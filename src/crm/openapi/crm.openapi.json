@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://unweighted-elois-trinomially.ngrok-free.dev",
+      "url": "https://f-grade-backend.onrender.com",
       "description": "Public ngrok URL for Copilot Studio integration"
     }
   ],
