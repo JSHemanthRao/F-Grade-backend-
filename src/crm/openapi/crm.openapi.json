@@ -1,0 +1,196 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "F-Grade Zoho CRM API",
+    "version": "1.0.0",
+    "description": "Single read-only CRM query endpoint optimized for Microsoft Copilot Studio. Use GET /api/crm/query with query parameters to fetch records from Zoho CRM modules."
+  },
+  "servers": [
+    {
+      "url": "https://unweighted-elois-trinomially.ngrok-free.dev",
+      "description": "Public ngrok URL for Copilot Studio integration"
+    }
+  ],
+  "tags": [
+    { "name": "CRM", "description": "Read-only Zoho CRM query operations" }
+  ],
+  "paths": {
+    "/api/crm/query": {
+      "get": {
+        "operationId": "getCrmQuery",
+        "tags": ["CRM"],
+        "summary": "Query Zoho CRM modules (read-only)",
+        "description": "Read-only query endpoint. Use the 'module' query parameter to select which Zoho CRM module to query (e.g., Leads, Contacts, Deals, Events). Supports pagination, field selection, filter criteria, and explicit ids. This endpoint does not create, update, or delete records.",
+        "parameters": [
+          {
+            "name": "module",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "example": "Leads" },
+            "description": "Canonical or natural-language module name. Examples: Leads, Lead, Contacts, Contact, Deals, Deal, Events, Meeting. Matching is case-insensitive and trimmed. Aliases are resolved by the backend."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "default": 1 },
+            "description": "Page number for pagination. Defaults to 1."
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "default": 25 },
+            "description": "Number of records per page. Defaults to 25. Maximum depends on Zoho CRM limits."
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "example": "First_Name,Last_Name,Email" },
+            "description": "Comma-separated list of field API names to include in each record. If omitted, a default field set is returned by the CRM service."
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "example": "((Lead_Status:equals:Open))" },
+            "description": "Zoho CRM criteria string for server-side filtering. Use Zoho's criteria syntax. If provided, this overrides basic 'search' style parameters."
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "example": "12345,67890" },
+            "description": "Comma-separated list of CRM record ids to fetch. When provided, pagination parameters may be ignored."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful CRM response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CRMResponse" },
+                "examples": {
+                  "LeadsExample": { "$ref": "#/components/examples/LeadsExample" },
+                  "ContactsExample": { "$ref": "#/components/examples/ContactsExample" },
+                  "DealsExample": { "$ref": "#/components/examples/DealsExample" },
+                  "EventsExample": { "$ref": "#/components/examples/EventsExample" }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (invalid parameters)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CRMErrorResponse" },
+                "examples": { "InvalidModule": { "$ref": "#/components/examples/InvalidModuleExample" } }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid OAuth token",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CRMErrorResponse" } } }
+          },
+          "500": {
+            "description": "Server error or Zoho API error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CRMErrorResponse" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CRMRecord": {
+        "type": "object",
+        "description": "A single CRM record returned from Zoho. Field names are module-specific.",
+        "additionalProperties": true
+      },
+      "CRMResponse": {
+        "type": "object",
+        "required": ["success","module","count","data"],
+        "properties": {
+          "success": { "type": "boolean", "description": "True when the operation completed successfully." },
+          "module": { "type": "string", "description": "Canonical module name used for this response." },
+          "count": { "type": "integer", "description": "Number of records returned in 'data'." },
+          "page": { "type": "integer", "description": "Page number (if pagination applied)." },
+          "per_page": { "type": "integer", "description": "Records per page (if pagination applied)." },
+          "executionTime": { "type": "string", "description": "Human-readable execution time or timestamp for diagnostics." },
+          "source": { "type": "string", "description": "Data source, e.g., 'Zoho CRM'." },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/CRMRecord" }, "description": "Array of CRM records." }
+        }
+      },
+      "CRMErrorResponse": {
+        "type": "object",
+        "required": ["success","error"],
+        "properties": {
+          "success": { "type": "boolean", "enum": [false] },
+          "error": { "type": "object", "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } }
+        }
+      }
+    },
+    "examples": {
+      "LeadsExample": {
+        "summary": "Example response for Leads module",
+        "value": {
+          "success": true,
+          "module": "Leads",
+          "count": 2,
+          "page": 1,
+          "per_page": 25,
+          "executionTime": "15ms",
+          "source": "Zoho CRM",
+          "data": [
+            { "id": "1000000001", "First_Name": "Alice", "Last_Name": "Smith", "Email": "alice@example.com", "Company": "Acme Corp" },
+            { "id": "1000000002", "First_Name": "Bob", "Last_Name": "Jones", "Email": "bob@example.com", "Company": "Contoso Ltd" }
+          ]
+        }
+      },
+      "ContactsExample": {
+        "summary": "Example response for Contacts module",
+        "value": {
+          "success": true,
+          "module": "Contacts",
+          "count": 1,
+          "page": 1,
+          "per_page": 25,
+          "executionTime": "12ms",
+          "source": "Zoho CRM",
+          "data": [ { "id": "20000001", "Full_Name": "Charlie Brown", "Email": "charlie@example.com", "Phone": "+1-555-0100" } ]
+        }
+      },
+      "DealsExample": {
+        "summary": "Example response for Deals module",
+        "value": {
+          "success": true,
+          "module": "Deals",
+          "count": 1,
+          "page": 1,
+          "per_page": 25,
+          "executionTime": "20ms",
+          "source": "Zoho CRM",
+          "data": [ { "id": "3000001", "Deal_Name": "Big Contract", "Amount": 75000, "Stage": "Negotiation" } ]
+        }
+      },
+      "EventsExample": {
+        "summary": "Example response for Events/Meetings module",
+        "value": {
+          "success": true,
+          "module": "Events",
+          "count": 1,
+          "page": 1,
+          "per_page": 25,
+          "executionTime": "10ms",
+          "source": "Zoho CRM",
+          "data": [ { "id": "4000001", "Subject": "Project Kickoff", "Start_DateTime": "2026-07-01T09:00:00Z", "End_DateTime": "2026-07-01T10:00:00Z", "Location": "Zoom" } ]
+        }
+      },
+      "InvalidModuleExample": {
+        "summary": "Example invalid module error",
+        "value": { "success": false, "error": { "code": "INVALID_MODULE", "message": "Unknown module 'Foo'. Allowed modules: Leads, Contacts, Accounts, Deals, Tasks, Events, Calls, Notes, Products, Vendors, Quotes, Sales_Orders, Purchase_Orders, Campaigns, Cases, Solutions, Users, Renewal_Accounts, Org." } }
+      }
+    }
+  }
+}

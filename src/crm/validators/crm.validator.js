@@ -1,0 +1,116 @@
+const { getModuleDefinition } = require('../services/module-definition.service');
+const { resolveAlias } = require('../services/module-alias.service');
+
+class CRMValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CRMValidationError';
+    this.status = 400;
+  }
+}
+
+function normalizeModuleKey(moduleKey) {
+  if (!moduleKey) {
+    return null;
+  }
+
+  return String(moduleKey).trim().toLowerCase();
+}
+
+function resolveRequestedModule(req) {
+  // Read module from common locations (query, body, params, route path)
+  const routePath = req?.route?.path;
+  let rawModule = null;
+  if (req?.query?.module) rawModule = req.query.module;
+  else if (req?.body?.module) rawModule = req.body.module;
+  else if (req?.params?.module) rawModule = req.params.module;
+  else if (routePath && routePath !== '/') rawModule = routePath.replace(/^\//, '').replace(/\/$/, '');
+
+  if (!rawModule) return null;
+
+  // Normalize input and resolve common natural-language aliases first
+  const aliasResolved = resolveAlias(rawModule);
+  if (aliasResolved) return aliasResolved;
+
+  // If no alias found, fall back to normalized module key
+  return normalizeModuleKey(rawModule);
+}
+
+function validatePositiveInteger(value, name) {
+  if (value === undefined || value === null || value === '') {
+    return;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new CRMValidationError(`${name} must be a positive integer.`);
+  }
+}
+
+function normalizeArrayParameter(value, name) {
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+  }
+
+  throw new CRMValidationError(`${name} must be a comma-separated string or an array.`);
+}
+
+function validateFilters(value) {
+  if (value === undefined || value === null || value === '') {
+    return;
+  }
+
+  if (typeof value === 'string') {
+    return;
+  }
+
+  if (typeof value === 'object') {
+    return;
+  }
+
+  throw new CRMValidationError('filters must be a string or object.');
+}
+
+function validateCRMRequest(req, res, next) {
+  try {
+    const moduleKey = resolveRequestedModule(req);
+
+    if (!moduleKey) {
+      throw new CRMValidationError('CRM module is required. Use query parameter module or a module-specific path.');
+    }
+
+    const moduleDefinition = getModuleDefinition(moduleKey);
+
+    if (!moduleDefinition) {
+      throw new CRMValidationError(`Unsupported CRM module: ${moduleKey}`);
+    }
+
+    validatePositiveInteger(req.query?.page ?? req.body?.page, 'page');
+    validatePositiveInteger(req.query?.per_page ?? req.body?.per_page, 'per_page');
+    normalizeArrayParameter(req.query?.ids ?? req.body?.ids, 'ids');
+    normalizeArrayParameter(req.query?.fields ?? req.body?.fields, 'fields');
+    validateFilters(req.query?.filters ?? req.body?.filters);
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = {
+  CRMValidationError,
+  resolveRequestedModule,
+  validateCRMRequest,
+};
