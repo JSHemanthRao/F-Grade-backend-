@@ -1,6 +1,11 @@
 const { zohoClient } = require('../../common/config/axios');
 const { NODE_ENV } = require('../../common/config/env');
 const { getModuleDefinition } = require('./module-definition.service');
+const {
+  DEFAULT_PER_PAGE,
+  fetchAllPages,
+  hasExplicitPagination,
+} = require('./pagination.service');
 
 function normalizeModuleKey(moduleKey) {
   if (!moduleKey) {
@@ -40,7 +45,10 @@ function buildQueryParams(moduleKey, options = {}) {
     per_page,
     ids,
     fields: requestedFields,
+    criteria,
     filters,
+    sort_by,
+    sort_order,
   } = options;
 
   const normalizedFields = normalizeFields(requestedFields);
@@ -67,8 +75,18 @@ function buildQueryParams(moduleKey, options = {}) {
     params.fields = fields.join(',');
   }
 
-  if (filters !== undefined && filters !== null && filters !== '') {
-    params.criteria = typeof filters === 'string' ? filters : JSON.stringify(filters);
+  const criteriaValue = criteria ?? filters;
+
+  if (criteriaValue !== undefined && criteriaValue !== null && criteriaValue !== '') {
+    params.criteria = typeof criteriaValue === 'string' ? criteriaValue : JSON.stringify(criteriaValue);
+  }
+
+  if (sort_by !== undefined && sort_by !== null && sort_by !== '') {
+    params.sort_by = String(sort_by);
+  }
+
+  if (sort_order !== undefined && sort_order !== null && sort_order !== '') {
+    params.sort_order = String(sort_order);
   }
 
   return {
@@ -150,21 +168,41 @@ async function getRecords(moduleKey, options = {}) {
     per_page,
     ids,
     fields: requestedFields,
-    filters,
   } = options;
   const normalizedKey = normalizeModuleKey(moduleKey);
   const moduleDefinition = getModuleDefinition(normalizedKey);
+  const shouldFetchAllPages = !hasExplicitPagination(options);
 
   if (normalizedKey === 'users') {
     console.debug('[Zoho CRM] Calling Users API');
 
     try {
+      const params = {
+        type: 'AllUsers',
+        ids: ids || undefined,
+      };
+
+      if (shouldFetchAllPages) {
+        const responseData = await fetchAllPages({
+          dataKey: 'users',
+          baseParams: params,
+          fetchPage: async (pageParams) => {
+            const response = await zohoClient.get('/crm/v8/users', { params: pageParams });
+            return response.data;
+          },
+        });
+
+        return {
+          data: responseData.users || [],
+          info: responseData.info || {},
+        };
+      }
+
       const response = await zohoClient.get('/crm/v8/users', {
         params: {
-          type: 'AllUsers',
+          ...params,
           page: Number(page || 1),
-          per_page: Number(per_page || 200),
-          ids: ids || undefined,
+          per_page: Number(per_page || DEFAULT_PER_PAGE),
         },
       });
 
@@ -187,6 +225,20 @@ async function getRecords(moduleKey, options = {}) {
   logRequestDebug(normalizedKey, moduleDefinition, params, responseFields);
 
   try {
+    if (shouldFetchAllPages) {
+      return await fetchAllPages({
+        baseParams: params,
+        fetchPage: async (pageParams) => {
+          const response = await zohoClient.get(
+            `/crm/v8/${moduleDefinition.endpoint}`,
+            { params: pageParams }
+          );
+
+          return response.data;
+        },
+      });
+    }
+
     const response = await zohoClient.get(
       `/crm/v8/${moduleDefinition.endpoint}`,
       { params }
@@ -194,7 +246,13 @@ async function getRecords(moduleKey, options = {}) {
 
     return response.data;
   } catch (error) {
-    logRequestError(error, normalizedKey, moduleDefinition, params, requestedFields);
+    logRequestError(
+      error,
+      normalizedKey,
+      moduleDefinition,
+      error?.config?.params || params,
+      requestedFields
+    );
     throw error;
   }
 }

@@ -68,6 +68,7 @@ async function getModuleRecords(req, res, next) {
       per_page: requestSource?.per_page,
       ids: requestSource?.ids,
       fields: requestSource?.fields,
+      criteria: requestSource?.criteria,
       filters: requestSource?.filters,
       search: requestSource?.search,
       sort_by: requestSource?.sort_by,

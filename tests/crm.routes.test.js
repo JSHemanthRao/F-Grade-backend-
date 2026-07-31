@@ -150,6 +150,93 @@ test('CRM service applies module fields and forwards Zoho query parameters', asy
   }
 });
 
+test('CRM service automatically merges all Zoho pages when pagination is not explicit', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: '1' }], info: { more_records: true } },
+    { data: [{ id: '2' }], info: { more_records: true } },
+    { data: [{ id: '3' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('deals', {
+      fields: ['Deal_Name', 'Stage'],
+      criteria: "(Stage:equals:Closed Won)",
+      sort_by: 'Closing_Date',
+      sort_order: 'desc',
+    });
+
+    assert.equal(requests.length, 3);
+    assert.deepEqual(
+      requests.map((request) => request.config.params.page),
+      [1, 2, 3]
+    );
+    requests.forEach((request) => {
+      assert.equal(request.url, '/crm/v8/Deals');
+      assert.equal(request.config.params.per_page, 200);
+      assert.equal(request.config.params.fields, 'Deal_Name,Stage');
+      assert.equal(request.config.params.criteria, "(Stage:equals:Closed Won)");
+      assert.equal(request.config.params.sort_by, 'Closing_Date');
+      assert.equal(request.config.params.sort_order, 'desc');
+    });
+    assert.deepEqual(result.data, [{ id: '1' }, { id: '2' }, { id: '3' }]);
+    assert.deepEqual(result.info, {
+      more_records: false,
+      count: 3,
+      page: 1,
+      per_page: 200,
+    });
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service switches to next_page_token after 2000 records', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    const requestNumber = requests.length;
+
+    if (requestNumber <= 9) {
+      return { data: { data: [{ id: String(requestNumber) }], info: { more_records: true } } };
+    }
+
+    if (requestNumber === 10) {
+      return {
+        data: {
+          data: [{ id: '10' }],
+          info: { more_records: true, next_page_token: 'token-10' },
+        },
+      };
+    }
+
+    return { data: { data: [{ id: '11' }], info: { more_records: false } } };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads');
+
+    assert.equal(requests.length, 11);
+    assert.equal(requests[9].config.params.page, 10);
+    assert.equal(requests[9].config.params.per_page, 200);
+    assert.equal(requests[10].config.params.page, undefined);
+    assert.equal(requests[10].config.params.page_token, 'token-10');
+    assert.equal(requests[10].config.params.per_page, 200);
+    assert.equal(result.data.length, 11);
+    assert.equal(result.info.count, 11);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
 test('CRM service surfaces Zoho API failures without fallback data', async () => {
   const originalGet = zohoClient.get;
   const error = {
