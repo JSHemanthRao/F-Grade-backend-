@@ -20,10 +20,13 @@ const FULL_RETRIEVAL_PATTERNS = [
   /\btotal\b/,
   /\bsum\b/,
   /\bsummary\b/,
+  /\bfiltered\b/,
+  /\bgrouped\b/,
   /\breport\b/,
   /\banalytics?\b/,
   /\bdashboard\b/,
   /\bcompare\b/,
+  /\bcomparison\b/,
   /\bconversion\b/,
   /\brate\b/,
   /\brevenue\b/,
@@ -33,6 +36,9 @@ const FULL_RETRIEVAL_PATTERNS = [
   /\blowest\b/,
   /\btop\b/,
   /\bmonthly\b/,
+  /\boverall\b/,
+  /\bcomplete\s+list\b/,
+  /\bfrom\b/,
   /\bbusiness\s+summary\b/,
   /\boverdue\b/,
   /\bclosed\b/,
@@ -48,11 +54,25 @@ const FULL_RETRIEVAL_PATTERNS = [
 
 const LIMITED_COUNT_PATTERN = /\b(?:first|latest|recent|newest|last|only|limit(?:ed)?\s+to|show)\s+(\d{1,3})\b/i;
 const PAGE_PATTERN = /\bpage\s+(\d{1,6})\b/i;
+const PER_PAGE_PATTERN = /\bper_page\s*=\s*(\d{1,6})\b/i;
 const FIELD_EQUALS_PATTERN = /\b(?:where|with)\s+([a-z][a-z0-9_\s]*?)\s*(?:=|equals|is)\s*["']?([^"',?]+)["']?/i;
 
-function hasExplicitPagination(options = {}) {
-  return options.page !== undefined && options.page !== null && options.page !== ''
-    || options.per_page !== undefined && options.per_page !== null && options.per_page !== '';
+function isValue(value, expected) {
+  return value !== undefined && value !== null && value !== '' && Number(value) === expected;
+}
+
+function hasExplicitPagination(options = {}, requestText = getRequestText(options)) {
+  const hasPage = options.page !== undefined && options.page !== null && options.page !== '';
+  const hasPerPage = options.per_page !== undefined && options.per_page !== null && options.per_page !== '';
+  const isCopilotDefault = isValue(options.page, 1) && isValue(options.per_page, 25);
+
+  // Copilot Studio adds these values to every request. They are transport
+  // defaults, not evidence that the user asked for a one-page result.
+  if (isCopilotDefault) {
+    return false;
+  }
+
+  return hasPage || hasPerPage;
 }
 
 function normalizeText(value) {
@@ -218,7 +238,9 @@ function inferEqualityCriteria(requestText) {
 }
 
 function getRetrievalPlan(moduleDefinition, options = {}) {
-  if (hasExplicitPagination(options)) {
+  const requestText = getRequestText(options);
+
+  if (hasExplicitPagination(options, requestText)) {
     return {
       strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
       fetchAll: false,
@@ -236,7 +258,6 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
     };
   }
 
-  const requestText = getRequestText(options);
   const inferredCriteria = !hasExplicitFilter(options) && requestText
     ? inferEqualityCriteria(requestText)
     : null;
@@ -254,16 +275,18 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
 
   const pageMatch = requestText.match(PAGE_PATTERN);
   const requestedPage = pageMatch ? parsePositiveInteger(pageMatch[1]) : null;
+  const perPageMatch = requestText.match(PER_PAGE_PATTERN);
+  const requestedPerPage = perPageMatch ? clampPerPage(perPageMatch[1]) : null;
 
-  if (requestedPage) {
+  if (requestedPage || requestedPerPage) {
     return {
       strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
       fetchAll: false,
       params: {
-        page: requestedPage,
-        per_page: DEFAULT_PER_PAGE,
+        page: requestedPage || 1,
+        per_page: requestedPerPage || DEFAULT_PER_PAGE,
       },
-      reason: 'requested_page',
+      reason: requestedPage ? 'requested_page' : 'requested_per_page',
     };
   }
 
@@ -317,6 +340,7 @@ async function fetchAllPages({
   baseParams = {},
   dataKey = 'data',
   perPage = DEFAULT_PER_PAGE,
+  onPageFetched,
 }) {
   const allRecords = [];
   let page = 1;
@@ -340,6 +364,10 @@ async function fetchAllPages({
     const info = payload?.info || {};
 
     lastPayload = payload || {};
+
+    if (onPageFetched) {
+      onPageFetched({ page, pageToken, recordsFetched: pageRecords.length });
+    }
 
     if (pageRecords.length === 0) {
       break;

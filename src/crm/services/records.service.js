@@ -162,6 +162,24 @@ function logRequestError(error, moduleKey, moduleConfig, queryParams, fields) {
   }
 }
 
+function logRetrievalPlan(moduleKey, options, retrievalPlan) {
+  console.debug('[Zoho CRM] Retrieval Strategy', {
+    module: moduleKey,
+    'Received page': options.page ?? null,
+    'Received per_page': options.per_page ?? null,
+    'Retrieval Strategy': retrievalPlan.strategy,
+    'Reason for strategy': retrievalPlan.reason,
+  });
+}
+
+function logRetrievalComplete(moduleKey, pagesFetched, totalRecords) {
+  console.debug('[Zoho CRM] Retrieval complete', {
+    module: moduleKey,
+    'Pages fetched': pagesFetched,
+    'Total records retrieved': totalRecords,
+  });
+}
+
 async function getRecords(moduleKey, options = {}) {
   const normalizedKey = normalizeModuleKey(moduleKey);
   const moduleDefinition = getModuleDefinition(normalizedKey);
@@ -177,6 +195,7 @@ async function getRecords(moduleKey, options = {}) {
     fields: requestedFields,
   } = effectiveOptions;
   const shouldFetchAllPages = retrievalPlan.fetchAll;
+  logRetrievalPlan(normalizedKey, options, retrievalPlan);
 
   if (normalizedKey === 'users') {
     console.debug('[Zoho CRM] Calling Users API');
@@ -188,6 +207,7 @@ async function getRecords(moduleKey, options = {}) {
       };
 
       if (shouldFetchAllPages) {
+        let pagesFetched = 0;
         const responseData = await fetchAllPages({
           dataKey: 'users',
           baseParams: params,
@@ -195,7 +215,10 @@ async function getRecords(moduleKey, options = {}) {
             const response = await zohoClient.get('/crm/v8/users', { params: pageParams });
             return response.data;
           },
+          onPageFetched: () => { pagesFetched += 1; },
         });
+
+        logRetrievalComplete(normalizedKey, pagesFetched, responseData.users?.length || 0);
 
         return {
           data: responseData.users || [],
@@ -210,6 +233,8 @@ async function getRecords(moduleKey, options = {}) {
           per_page: Number(per_page || DEFAULT_PER_PAGE),
         },
       });
+
+      logRetrievalComplete(normalizedKey, 1, response.data.users?.length || 0);
 
       return {
         data: response.data.users || [],
@@ -231,7 +256,9 @@ async function getRecords(moduleKey, options = {}) {
 
   try {
     if (shouldFetchAllPages) {
-      return await fetchAllPages({
+      let pagesFetched = 0;
+      let totalRecords = 0;
+      const result = await fetchAllPages({
         baseParams: params,
         fetchPage: async (pageParams) => {
           const response = await zohoClient.get(
@@ -241,13 +268,22 @@ async function getRecords(moduleKey, options = {}) {
 
           return response.data;
         },
+        onPageFetched: ({ recordsFetched }) => {
+          pagesFetched += 1;
+          totalRecords += recordsFetched;
+        },
       });
+
+      logRetrievalComplete(normalizedKey, pagesFetched, totalRecords);
+      return result;
     }
 
     const response = await zohoClient.get(
       `/crm/v8/${moduleDefinition.endpoint}`,
       { params }
     );
+
+    logRetrievalComplete(normalizedKey, 1, response.data?.data?.length || response.data?.users?.length || 0);
 
     return response.data;
   } catch (error) {

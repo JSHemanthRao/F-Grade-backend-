@@ -197,6 +197,61 @@ test('CRM service automatically merges all Zoho pages when pagination is not exp
   }
 });
 
+test('CRM service ignores Copilot default pagination for complete and filtered requests', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: '1' }], info: { more_records: true } },
+    { data: [{ id: '2' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      search: 'Give me the complete list of Leads from Advertisement',
+    });
+
+    assert.equal(requests.length, 2);
+    requests.forEach((request, index) => {
+      assert.equal(request.config.params.page, index + 1);
+      assert.equal(request.config.params.per_page, 200);
+    });
+    assert.deepEqual(result.data, [{ id: '1' }, { id: '2' }]);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service still respects explicitly requested page and limits', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: { data: [{ id: '1' }], info: { more_records: true } } };
+  };
+
+  try {
+    await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      search: 'Show page 2 of Leads',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].config.params.page, 2);
+    assert.equal(requests[0].config.params.per_page, 200);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
 test('CRM service uses one default page for plain module list prompts', async () => {
   const originalGet = zohoClient.get;
   const requests = [];
