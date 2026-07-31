@@ -8,6 +8,7 @@ const openapiSpec = require('../src/crm/openapi/crm.openapi.json');
 
 const expectedRoutes = [
   '/',
+  '/count',
   '/query',
   '/leads',
   '/contacts',
@@ -120,20 +121,20 @@ test('CRM controller resolves the requested module from the query string', async
   recordsService.getRecords = originalGetRecords;
 });
 
-test('CRM controller forwards retrieval_mode from the query string', async () => {
-  const originalGetRecords = recordsService.getRecords;
+test('CRM controller routes count requests without pagination parameters', async () => {
+  const originalGetCount = recordsService.getCount;
   let receivedOptions;
 
-  recordsService.getRecords = async (_moduleName, options) => {
+  recordsService.getCount = async (_moduleName, options) => {
     receivedOptions = options;
-    return { data: [], info: {} };
+    return { data: [], info: { count: 437 } };
   };
 
   const req = {
-    route: { path: '/' },
+    route: { path: '/count' },
     query: {
       module: 'leads',
-      retrieval_mode: 'all',
+      filter: '(Lead_Source:equals:Advertisement)',
       page: 1,
       per_page: 25,
     },
@@ -150,29 +151,33 @@ test('CRM controller forwards retrieval_mode from the query string', async () =>
     },
   };
 
-  await controller.getModuleRecords(req, res, () => {});
+  await controller.getModuleCount(req, res, () => {});
 
-  assert.equal(receivedOptions.retrieval_mode, 'all');
-  assert.equal(receivedOptions.page, 1);
-  assert.equal(receivedOptions.per_page, 25);
+  assert.equal(receivedOptions.filter, '(Lead_Source:equals:Advertisement)');
+  assert.equal(receivedOptions.retrieval_mode, 'count');
+  assert.equal(res.payload.success, true);
+  assert.equal(res.payload.module, 'Leads');
+  assert.equal(res.payload.count, 437);
+  assert.equal(res.payload.page, undefined);
+  assert.equal(res.payload.per_page, undefined);
 
-  recordsService.getRecords = originalGetRecords;
+  recordsService.getCount = originalGetCount;
 });
 
-test('CRM OpenAPI marks module required and page-related inputs optional', () => {
+test('CRM OpenAPI exposes separate count and query operations', () => {
+  const countOperation = openapiSpec.paths['/api/crm/count'].get;
   const queryOperation = openapiSpec.paths['/api/crm/query'].get;
-  const parameters = queryOperation.parameters;
 
-  const moduleParam = parameters.find((parameter) => parameter.name === 'module');
-  const pageParam = parameters.find((parameter) => parameter.name === 'page');
-  const perPageParam = parameters.find((parameter) => parameter.name === 'per_page');
-  const retrievalModeParam = parameters.find((parameter) => parameter.name === 'retrieval_mode');
+  const countParameterNames = countOperation.parameters.map((parameter) => parameter.name);
+  const queryParameterNames = queryOperation.parameters.map((parameter) => parameter.name);
 
-  assert.equal(moduleParam.required, true);
-  assert.equal(pageParam.required, false);
-  assert.equal(perPageParam.required, false);
-  assert.equal(retrievalModeParam.required, false);
-  assert.ok(retrievalModeParam.schema.enum.includes('count'));
+  assert.equal(countOperation.operationId, 'countCRMRecords');
+  assert.equal(queryOperation.operationId, 'queryCRMRecords');
+  assert.deepEqual(countParameterNames, ['module', 'filter']);
+  assert.deepEqual(queryParameterNames, ['module', 'page', 'per_page', 'fields', 'filter', 'ids']);
+  assert.equal(countOperation.parameters[0].required, true);
+  assert.equal(queryOperation.parameters[0].required, true);
+  assert.equal(queryOperation.parameters.some((parameter) => parameter.name === 'retrieval_mode'), false);
 });
 
 test('CRM service applies module fields and forwards Zoho query parameters', async () => {

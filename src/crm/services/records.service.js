@@ -51,6 +51,7 @@ function buildQueryParams(moduleKey, options = {}) {
     ids,
     fields: requestedFields,
     criteria,
+    filter,
     filters,
     sort_by,
     sort_order,
@@ -80,7 +81,7 @@ function buildQueryParams(moduleKey, options = {}) {
     params.fields = fields.join(',');
   }
 
-  const criteriaValue = criteria ?? filters;
+  const criteriaValue = criteria ?? filter ?? filters;
 
   if (criteriaValue !== undefined && criteriaValue !== null && criteriaValue !== '') {
     params.criteria = typeof criteriaValue === 'string' ? criteriaValue : JSON.stringify(criteriaValue);
@@ -225,7 +226,7 @@ function getPreferredField(moduleDefinition, candidates) {
 }
 
 function buildCountCriteria(moduleKey, moduleDefinition, options = {}, requestText = '') {
-  const explicitCriteria = normalizeCriteriaValue(options.criteria ?? options.filters);
+  const explicitCriteria = normalizeCriteriaValue(options.criteria ?? options.filter ?? options.filters);
 
   if (explicitCriteria) {
     return explicitCriteria;
@@ -308,6 +309,16 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
       retrievalStrategy: RETRIEVAL_STRATEGIES.COUNT,
     },
   };
+}
+
+async function getCount(moduleKey, options = {}) {
+  const normalizedKey = normalizeModuleKey(moduleKey);
+  const moduleDefinition = getModuleDefinition(normalizedKey);
+
+  return executeCountRequest(normalizedKey, moduleDefinition, {
+    ...options,
+    retrieval_mode: 'count',
+  });
 }
 
 function getPaginationInterpretation(options, requestText) {
@@ -501,5 +512,6 @@ async function getRecords(moduleKey, options = {}) {
 }
 
 module.exports = {
+  getCount,
   getRecords,
 };

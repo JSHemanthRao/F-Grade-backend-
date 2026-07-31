@@ -1,7 +1,7 @@
 const express = require('express');
-const { getModuleRecords } = require('../controllers/crm.controller');
+const { getModuleCount, getModuleQuery } = require('../controllers/crm.controller');
 const { getSupportedModuleKeys } = require('../services/module-definition.service');
-const { validateCRMRequest } = require('../validators/crm.validator');
+const { validateCRMCountRequest, validateCRMQueryRequest } = require('../validators/crm.validator');
 const { requestLogger } = require('../middleware/request-logger');
 const { crmErrorHandler } = require('../middleware/error-handler');
 
@@ -11,14 +11,15 @@ router.use(requestLogger);
 const supportedModules = getSupportedModuleKeys();
 
 supportedModules.forEach((moduleName) => {
-  router.get(`/${moduleName}`, validateCRMRequest, getModuleRecords);
+  router.get(`/${moduleName}`, validateCRMQueryRequest, getModuleQuery);
 });
 
 // New primary read-only dynamic endpoint
-router.get('/query', validateCRMRequest, getModuleRecords);
+router.get('/count', validateCRMCountRequest, getModuleCount);
+router.get('/query', validateCRMQueryRequest, getModuleQuery);
 
 // Keep root for backward compatibility (resolves module by route path)
-router.get('/', validateCRMRequest, getModuleRecords);
+router.get('/', validateCRMQueryRequest, getModuleQuery);
 
 // No POST /query - this API is read-only. Error handler remains.
 router.use(crmErrorHandler);

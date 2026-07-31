@@ -3,24 +3,93 @@
   "info": {
     "title": "F-Grade Zoho CRM API",
     "version": "1.0.0",
-    "description": "Single read-only CRM query endpoint optimized for Microsoft Copilot Studio. Use GET /api/crm/query with query parameters to fetch records from Zoho CRM modules.",
+    "description": "Read-only Zoho CRM API for Microsoft Copilot Studio.",
     "license": {
       "name": "ISC",
       "url": "https://spdx.org/licenses/ISC.html"
     }
   },
-  "security": [],
   "host": "f-grade-backend.onrender.com",
   "basePath": "/",
   "schemes": ["https"],
   "produces": ["application/json"],
+  "security": [],
   "paths": {
+    "/api/crm/count": {
+      "get": {
+        "operationId": "countCRMRecords",
+        "tags": ["CRM"],
+        "summary": "Count Zoho CRM records",
+        "description": "Use this operation whenever the user asks how many, count, total, number of records, or a filtered record count. Returns the complete matching CRM record count. Never use pagination for this operation.",
+        "parameters": [
+          {
+            "name": "module",
+            "in": "query",
+            "required": true,
+            "type": "string",
+            "description": "Canonical or natural-language module name. Examples: Leads, Contacts, Accounts, Deals."
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "Optional Zoho CRM criteria string for filtered counts."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful CRM count response",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": { "type": "boolean" },
+                "module": { "type": "string" },
+                "count": { "type": "integer", "format": "int32" },
+                "executionTime": { "type": "string" },
+                "source": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": { "type": "boolean" },
+                "error": { "type": "string" }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required or invalid OAuth token",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": { "type": "boolean" },
+                "error": { "type": "string" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error or Zoho API error",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": { "type": "boolean" },
+                "error": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/crm/query": {
       "get": {
-        "operationId": "queryZohoCRM",
+        "operationId": "queryCRMRecords",
         "tags": ["CRM"],
-        "summary": "Query Zoho CRM modules (read-only)",
-        "description": "Read-only query endpoint for Zoho CRM modules. Module is required. Use retrieval_mode=count for count questions, retrieval_mode=all for complete datasets, and retrieval_mode=page for paginated requests.",
+        "summary": "Query Zoho CRM records",
+        "description": "Use this operation when the user asks to view, list, show, retrieve, or inspect CRM records. Supports pagination and field/filter selection.",
         "parameters": [
           {
             "name": "module",
@@ -48,15 +117,6 @@
             "description": "Optional records per page for paginated requests."
           },
           {
-            "name": "retrieval_mode",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "enum": ["auto", "page", "all", "count"],
-            "default": "auto",
-            "description": "Controls CRM record retrieval. Use 'count' for how many, total, count, or number of records. Use 'all' for the complete matching dataset. Use 'page' for limited or paginated requests such as first 30, next 30, or page 2. Use 'auto' otherwise."
-          },
-          {
             "name": "fields",
             "in": "query",
             "required": false,
@@ -64,7 +124,7 @@
             "description": "Optional comma-separated field API names to include in each record."
           },
           {
-            "name": "filters",
+            "name": "filter",
             "in": "query",
             "required": false,
             "type": "string",
@@ -84,30 +144,13 @@
             "schema": {
               "type": "object",
               "properties": {
-                "success": {
-                  "type": "boolean"
-                },
-                "module": {
-                  "type": "string"
-                },
-                "count": {
-                  "type": "integer",
-                  "format": "int32"
-                },
-                "page": {
-                  "type": "integer",
-                  "format": "int32"
-                },
-                "per_page": {
-                  "type": "integer",
-                  "format": "int32"
-                },
-                "executionTime": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                },
+                "success": { "type": "boolean" },
+                "module": { "type": "string" },
+                "count": { "type": "integer", "format": "int32" },
+                "page": { "type": "integer", "format": "int32" },
+                "per_page": { "type": "integer", "format": "int32" },
+                "executionTime": { "type": "string" },
+                "source": { "type": "string" },
                 "data": {
                   "type": "array",
                   "items": {
@@ -122,12 +165,8 @@
             "schema": {
               "type": "object",
               "properties": {
-                "success": {
-                  "type": "boolean"
-                },
-                "error": {
-                  "type": "string"
-                }
+                "success": { "type": "boolean" },
+                "error": { "type": "string" }
               }
             }
           },
@@ -136,12 +175,8 @@
             "schema": {
               "type": "object",
               "properties": {
-                "success": {
-                  "type": "boolean"
-                },
-                "error": {
-                  "type": "string"
-                }
+                "success": { "type": "boolean" },
+                "error": { "type": "string" }
               }
             }
           },
@@ -150,12 +185,8 @@
             "schema": {
               "type": "object",
               "properties": {
-                "success": {
-                  "type": "boolean"
-                },
-                "error": {
-                  "type": "string"
-                }
+                "success": { "type": "boolean" },
+                "error": { "type": "string" }
               }
             }
           }
