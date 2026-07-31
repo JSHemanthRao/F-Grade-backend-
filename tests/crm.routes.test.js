@@ -236,6 +236,96 @@ test('CRM service automatically merges all Zoho pages when pagination is not exp
   }
 });
 
+test('CRM service uses Zoho count endpoint for count and total questions', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: { count: 437 } };
+  };
+
+  try {
+    const countRequest = await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      retrieval_mode: 'all',
+      search: 'How many leads are there in the entire CRM?',
+    });
+
+    const totalRequest = await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      retrieval_mode: 'all',
+      search: 'Total leads',
+    });
+
+    assert.equal(requests.length, 2);
+    requests.forEach((request) => {
+      assert.equal(request.url, '/crm/v8/Leads/actions/count');
+      assert.deepEqual(request.config.params, {});
+    });
+    assert.equal(countRequest.info.count, 437);
+    assert.equal(countRequest.data.length, 0);
+    assert.equal(totalRequest.info.count, 437);
+    assert.equal(totalRequest.data.length, 0);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service counts filtered closed won deals without paginating records', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: { count: 91 } };
+  };
+
+  try {
+    const result = await recordsService.getRecords('deals', {
+      retrieval_mode: 'all',
+      search: 'How many closed won deals?',
+      filters: '(Stage:equals:Closed Won)',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Deals/actions/count');
+    assert.equal(requests[0].config.params.criteria, '(Stage:equals:Closed Won)');
+    assert.equal(result.info.count, 91);
+    assert.equal(result.data.length, 0);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service counts filtered leads from advertisement without record pagination', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: { count: 18 } };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      retrieval_mode: 'all',
+      search: 'How many leads came from Advertisement?',
+      filters: '(Lead_Source:equals:Advertisement)',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Leads/actions/count');
+    assert.equal(requests[0].config.params.criteria, '(Lead_Source:equals:Advertisement)');
+    assert.equal(result.info.count, 18);
+    assert.equal(result.data.length, 0);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
 test('CRM service retrieves every Zoho page when retrieval_mode=all even with Copilot defaults', async () => {
   const originalGet = zohoClient.get;
   const requests = [];
@@ -449,7 +539,7 @@ test('CRM service switches to next_page_token after 2000 records', async () => {
 
   try {
     const result = await recordsService.getRecords('leads', {
-      search: 'How many leads are there?',
+      search: 'Show all leads',
     });
 
     assert.equal(requests.length, 11);

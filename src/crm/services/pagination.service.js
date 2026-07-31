@@ -4,9 +4,11 @@ const DEFAULT_LIMITED_PER_PAGE = 25;
 const SINGLE_RECORD_PER_PAGE = 1;
 
 const RETRIEVAL_STRATEGIES = {
+  COUNT: 'count',
   SINGLE_RECORD: 'single_record',
   PAGINATED_LIST: 'paginated_list',
-  COMPLETE_MATCHING_DATASET: 'complete_matching_dataset',
+  FULL_DATASET: 'full_dataset',
+  COMPLETE_MATCHING_DATASET: 'full_dataset',
 };
 
 const RETRIEVAL_MODES = {
@@ -20,10 +22,6 @@ const FULL_RETRIEVAL_PATTERNS = [
   /\bevery\b/,
   /\bcomplete\b/,
   /\bentire\b/,
-  /\bhow\s+many\b/,
-  /\bnumber\s+of\b/,
-  /\bcount\b/,
-  /\btotal\b/,
   /\bsum\b/,
   /\bsummary\b/,
   /\bfiltered\b/,
@@ -56,6 +54,13 @@ const FULL_RETRIEVAL_PATTERNS = [
   /\bmatching\b/,
   /\bthis\s+month\b/,
   /\blast\s+month\b/,
+];
+
+const COUNT_INTENT_PATTERNS = [
+  /\bhow\s+many\b/,
+  /\bnumber\s+of\b/,
+  /\bcount\b/,
+  /\btotal\b/,
 ];
 
 const LIMITED_COUNT_PATTERN = /\b(?:first|latest|recent|newest|last|only|limit(?:ed)?\s+to|show)\s+(\d{1,3})\b/i;
@@ -114,6 +119,12 @@ function hasFullRetrievalIntent(requestText) {
   const normalizedRequestText = String(requestText || '').toLowerCase();
 
   return FULL_RETRIEVAL_PATTERNS.some((pattern) => pattern.test(normalizedRequestText));
+}
+
+function hasCountIntent(requestText) {
+  const normalizedRequestText = String(requestText || '').toLowerCase();
+
+  return COUNT_INTENT_PATTERNS.some((pattern) => pattern.test(normalizedRequestText));
 }
 
 function hasExplicitFilter(options = {}) {
@@ -286,11 +297,21 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
   const retrievalMode = normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode);
 
   if (retrievalMode === RETRIEVAL_MODES.ALL) {
+    if (hasCountIntent(requestText)) {
+      return {
+        strategy: RETRIEVAL_STRATEGIES.COUNT,
+        fetchAll: false,
+        params: {},
+        reason: 'count_intent',
+        retrievalMode,
+      };
+    }
+
     return {
-      strategy: RETRIEVAL_STRATEGIES.COMPLETE_MATCHING_DATASET,
+      strategy: RETRIEVAL_STRATEGIES.FULL_DATASET,
       fetchAll: true,
       params: {},
-      reason: 'retrieval_mode_all',
+      reason: 'retrieval_mode_all_full_dataset',
       retrievalMode,
     };
   }
@@ -301,6 +322,16 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       fetchAll: false,
       params: {},
       reason: 'retrieval_mode_page',
+      retrievalMode,
+    };
+  }
+
+  if (hasCountIntent(requestText)) {
+    return {
+      strategy: RETRIEVAL_STRATEGIES.COUNT,
+      fetchAll: false,
+      params: {},
+      reason: 'count_intent',
       retrievalMode,
     };
   }
@@ -331,7 +362,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
 
   if (hasExplicitFilter(options) || inferredCriteria || (requestText && hasFullRetrievalIntent(requestText))) {
     return {
-      strategy: RETRIEVAL_STRATEGIES.COMPLETE_MATCHING_DATASET,
+      strategy: RETRIEVAL_STRATEGIES.FULL_DATASET,
       fetchAll: true,
       params: inferredCriteria ? { criteria: inferredCriteria } : {},
       reason: hasExplicitFilter(options) || inferredCriteria
@@ -546,4 +577,7 @@ module.exports = {
   SINGLE_RECORD_PER_PAGE,
   getRequestText,
   normalizeRetrievalMode,
+  hasCountIntent,
+  hasFullRetrievalIntent,
+  inferEqualityCriteria,
 };

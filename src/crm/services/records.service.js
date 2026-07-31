@@ -5,9 +5,11 @@ const {
   DEFAULT_PER_PAGE,
   fetchAllPages,
   getRetrievalPlan,
+  inferEqualityCriteria,
   getRequestText,
   hasExplicitPagination,
   normalizeRetrievalMode,
+  RETRIEVAL_STRATEGIES,
 } = require('./pagination.service');
 
 function normalizeModuleKey(moduleKey) {
@@ -170,8 +172,8 @@ function logRetrievalPlan(moduleKey, options, retrievalPlan) {
     module: moduleKey,
     'Received page': options.page ?? null,
     'Received per_page': options.per_page ?? null,
-    'Retrieval Strategy': retrievalPlan.strategy,
-    'Reason for strategy': retrievalPlan.reason,
+    strategy: retrievalPlan.strategy,
+    reason: retrievalPlan.reason,
   });
 }
 
@@ -181,6 +183,131 @@ function logRetrievalComplete(moduleKey, pagesFetched, totalRecords) {
     'Pages fetched': pagesFetched,
     'Total merged records': totalRecords,
   });
+}
+
+function logCountComplete(moduleKey, count) {
+  console.debug('[Zoho CRM] Count complete', {
+    module: moduleKey,
+    count,
+  });
+}
+
+function normalizeCriteriaValue(criteriaValue) {
+  if (criteriaValue === undefined || criteriaValue === null || criteriaValue === '') {
+    return null;
+  }
+
+  return typeof criteriaValue === 'string' ? criteriaValue : JSON.stringify(criteriaValue);
+}
+
+function formatZohoDate(date) {
+  return date.toISOString().replace('.000Z', 'Z');
+}
+
+function getMonthRangeCriteria(fieldName, monthOffset = 0) {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset + 1, 1, 0, 0, 0, 0));
+
+  return `((${fieldName}:greater_equal:${formatZohoDate(start)})and(${fieldName}:less_than:${formatZohoDate(end)}))`;
+}
+
+function getPreferredField(moduleDefinition, candidates) {
+  const fields = Array.isArray(moduleDefinition.defaultFields) ? moduleDefinition.defaultFields : [];
+
+  for (const candidate of candidates) {
+    if (fields.some((field) => String(field).toLowerCase() === String(candidate).toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  return candidates[0] || null;
+}
+
+function buildCountCriteria(moduleKey, moduleDefinition, options = {}, requestText = '') {
+  const explicitCriteria = normalizeCriteriaValue(options.criteria ?? options.filters);
+
+  if (explicitCriteria) {
+    return explicitCriteria;
+  }
+
+  const inferredEqualityCriteria = inferEqualityCriteria(requestText);
+
+  if (inferredEqualityCriteria) {
+    return inferredEqualityCriteria;
+  }
+
+  const normalizedText = String(requestText || '').toLowerCase();
+
+  if (/\bclosed\s+won\b/.test(normalizedText)) {
+    const stageField = getPreferredField(moduleDefinition, ['Stage', 'Deal_Stage']);
+
+    if (stageField) {
+      return `(${stageField}:equals:Closed Won)`;
+    }
+  }
+
+  if (/\bthis\s+month\b/.test(normalizedText)) {
+    const dateField = getPreferredField(moduleDefinition, ['Created_Time', 'Modified_Time', 'Created_Time']);
+
+    if (dateField) {
+      return getMonthRangeCriteria(dateField, 0);
+    }
+  }
+
+  if (/\blast\s+month\b/.test(normalizedText)) {
+    const dateField = getPreferredField(moduleDefinition, ['Created_Time', 'Modified_Time', 'Created_Time']);
+
+    if (dateField) {
+      return getMonthRangeCriteria(dateField, -1);
+    }
+  }
+
+  if (/\bfrom\s+advertisement\b/.test(normalizedText) || /\bcame\s+from\s+advertisement\b/.test(normalizedText)) {
+    const sourceField = getPreferredField(moduleDefinition, ['Lead_Source', 'Deal_Source', 'Source']);
+
+    if (sourceField) {
+      return `(${sourceField}:equals:Advertisement)`;
+    }
+  }
+
+  if (moduleKey === 'leads' && /\badvertisement\b/.test(normalizedText)) {
+    return '(Lead_Source:equals:Advertisement)';
+  }
+
+  return null;
+}
+
+async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
+  const requestText = getRequestText(options);
+  const criteria = buildCountCriteria(moduleKey, moduleDefinition, options, requestText);
+  const params = {};
+
+  if (criteria) {
+    params.criteria = criteria;
+  }
+
+  logRequestDebug(moduleKey, moduleDefinition, params, []);
+
+  const response = await zohoClient.get(
+    `/crm/v8/${moduleDefinition.endpoint}/actions/count`,
+    { params }
+  );
+
+  const count = Number(response.data?.count ?? 0);
+
+  logCountComplete(moduleKey, count);
+
+  return {
+    data: [],
+    info: {
+      count,
+      more_records: false,
+      page: 1,
+      per_page: 1,
+      retrievalStrategy: RETRIEVAL_STRATEGIES.COUNT,
+    },
+  };
 }
 
 function getPaginationInterpretation(options, requestText) {
@@ -223,11 +350,7 @@ function logPlannerDebug(moduleKey, options, retrievalPlan, moduleDefinition) {
     'Original user prompt': originalUserPrompt || null,
     'retrieval_mode received': retrievalMode,
     'Detected retrieval intent': retrievalPlan.strategy,
-    'Retrieval strategy selected': retrievalPlan.strategy === 'single_record'
-      ? 'Single Record'
-      : retrievalPlan.strategy === 'complete_matching_dataset'
-        ? 'Complete Dataset'
-        : 'Paginated List',
+    'Retrieval strategy selected': retrievalPlan.strategy,
     'Reason for selecting that strategy': retrievalPlan.reason,
     'page=1 and per_page=25 treated as Copilot defaults or explicit user pagination': paginationInterpretation.interpretation,
     'fetchAll=true or false': retrievalPlan.fetchAll,
@@ -258,6 +381,21 @@ async function getRecords(moduleKey, options = {}) {
     'retrieval_mode received': normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode),
     'retrieval strategy selected': retrievalPlan.strategy,
   });
+
+  if (retrievalPlan.strategy === RETRIEVAL_STRATEGIES.COUNT) {
+    try {
+      return await executeCountRequest(normalizedKey, moduleDefinition, options);
+    } catch (error) {
+      logRequestError(
+        error,
+        normalizedKey,
+        moduleDefinition,
+        error?.config?.params || {},
+        []
+      );
+      throw error;
+    }
+  }
 
   if (normalizedKey === 'users') {
     console.debug('[Zoho CRM] Calling Users API');
