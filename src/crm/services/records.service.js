@@ -7,6 +7,7 @@ const {
   getRetrievalPlan,
   getRequestText,
   hasExplicitPagination,
+  normalizeRetrievalMode,
 } = require('./pagination.service');
 
 function normalizeModuleKey(moduleKey) {
@@ -214,11 +215,13 @@ function getPaginationInterpretation(options, requestText) {
 function logPlannerDebug(moduleKey, options, retrievalPlan, moduleDefinition) {
   const originalUserPrompt = getRequestText(options);
   const paginationInterpretation = getPaginationInterpretation(options, originalUserPrompt);
+  const retrievalMode = normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode);
 
   console.debug('[Zoho CRM] Retrieval planner debug', {
     module: moduleKey,
     endpoint: moduleDefinition.endpoint,
     'Original user prompt': originalUserPrompt || null,
+    'retrieval_mode received': retrievalMode,
     'Detected retrieval intent': retrievalPlan.strategy,
     'Retrieval strategy selected': retrievalPlan.strategy === 'single_record'
       ? 'Single Record'
@@ -250,6 +253,11 @@ async function getRecords(moduleKey, options = {}) {
   const shouldFetchAllPages = retrievalPlan.fetchAll;
   logPlannerDebug(normalizedKey, options, retrievalPlan, moduleDefinition);
   logRetrievalPlan(normalizedKey, options, retrievalPlan);
+  console.debug('[Zoho CRM] Retrieval mode decision', {
+    module: normalizedKey,
+    'retrieval_mode received': normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode),
+    'retrieval strategy selected': retrievalPlan.strategy,
+  });
 
   if (normalizedKey === 'users') {
     console.debug('[Zoho CRM] Calling Users API');

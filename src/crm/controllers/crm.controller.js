@@ -76,6 +76,7 @@ async function getModuleRecords(req, res, next) {
       question: requestSource?.question,
       prompt: requestSource?.prompt,
       message: requestSource?.message,
+      retrieval_mode: requestSource?.retrieval_mode ?? requestSource?.retrievalMode,
       sort_by: requestSource?.sort_by,
       sort_order: requestSource?.sort_order,
     };

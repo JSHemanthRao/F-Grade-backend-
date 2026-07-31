@@ -44,6 +44,17 @@
             "description": "Number of records per page. Defaults to 25. Maximum depends on Zoho CRM limits."
           },
           {
+            "name": "retrieval_mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["auto", "page", "all"],
+              "default": "auto"
+            },
+            "description": "Controls CRM record retrieval. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, counts, totals, how many, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
+          },
+          {
             "name": "fields",
             "in": "query",
             "required": false,

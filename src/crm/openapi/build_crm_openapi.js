@@ -33,6 +33,12 @@ const spec = {
       Module: { name: 'module', in: 'query', schema: { type: 'string' }, description: 'CRM module key' },
       Page: { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Page number' },
       PerPage: { name: 'per_page', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Records per page' },
+      RetrievalMode: {
+        name: 'retrieval_mode',
+        in: 'query',
+        schema: { type: 'string', enum: ['auto', 'page', 'all'], default: 'auto' },
+        description: "Controls CRM record retrieval. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, counts, totals, how many, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
+      },
       Ids: { name: 'ids', in: 'query', schema: { type: 'string' }, description: 'Comma-separated ids' },
       Fields: { name: 'fields', in: 'query', schema: { type: 'string' }, description: 'Comma-separated fields' },
       Filters: { name: 'filters', in: 'query', schema: { type: 'string' }, description: 'Zoho criteria string' }
@@ -87,7 +93,7 @@ spec.paths['/'] = {
     operationId: 'getCrmRecords',
     summary: 'Generic CRM module query (legacy)',
     tags: ['CRM'],
-    parameters: [ { $ref: '#/components/parameters/Module' }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PerPage' }, { $ref: '#/components/parameters/Ids' }, { $ref: '#/components/parameters/Fields' }, { $ref: '#/components/parameters/Filters' } ],
+    parameters: [ { $ref: '#/components/parameters/Module' }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PerPage' }, { $ref: '#/components/parameters/RetrievalMode' }, { $ref: '#/components/parameters/Ids' }, { $ref: '#/components/parameters/Fields' }, { $ref: '#/components/parameters/Filters' } ],
     responses: { '200': { description: 'Successful', content: { 'application/json': { schema: { $ref: '#/components/schemas/CRMResponse' } } } }, '400': { $ref: '#/components/responses/BadRequest' }, '500': { $ref: '#/components/responses/ServerError' } }
   }
 };
@@ -122,7 +128,7 @@ defs.forEach(def => {
       operationId: `get${def.label.replace(/[^a-zA-Z0-9]/g,'')}`,
       summary: `Get ${def.label}`,
       tags: ['CRM'],
-      parameters: [ { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PerPage' }, { $ref: '#/components/parameters/Ids' }, { $ref: '#/components/parameters/Fields' }, { $ref: '#/components/parameters/Filters' } ],
+      parameters: [ { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PerPage' }, { $ref: '#/components/parameters/RetrievalMode' }, { $ref: '#/components/parameters/Ids' }, { $ref: '#/components/parameters/Fields' }, { $ref: '#/components/parameters/Filters' } ],
       responses: {
         '200': { description: 'Successful', content: { 'application/json': { schema: { $ref: '#/components/schemas/CRMResponse' }, examples: { default: { value: exampleResponse } } } } },
         '400': { $ref: '#/components/responses/BadRequest' },

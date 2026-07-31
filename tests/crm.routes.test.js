@@ -119,6 +119,45 @@ test('CRM controller resolves the requested module from the query string', async
   recordsService.getRecords = originalGetRecords;
 });
 
+test('CRM controller forwards retrieval_mode from the query string', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  let receivedOptions;
+
+  recordsService.getRecords = async (_moduleName, options) => {
+    receivedOptions = options;
+    return { data: [], info: {} };
+  };
+
+  const req = {
+    route: { path: '/' },
+    query: {
+      module: 'leads',
+      retrieval_mode: 'all',
+      page: 1,
+      per_page: 25,
+    },
+    body: {},
+  };
+  const res = {
+    statusCode: 200,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+    },
+  };
+
+  await controller.getModuleRecords(req, res, () => {});
+
+  assert.equal(receivedOptions.retrieval_mode, 'all');
+  assert.equal(receivedOptions.page, 1);
+  assert.equal(receivedOptions.per_page, 25);
+
+  recordsService.getRecords = originalGetRecords;
+});
+
 test('CRM service applies module fields and forwards Zoho query parameters', async () => {
   const originalGet = zohoClient.get;
   const requests = [];
@@ -192,6 +231,72 @@ test('CRM service automatically merges all Zoho pages when pagination is not exp
       page: 1,
       per_page: 200,
     });
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service retrieves every Zoho page when retrieval_mode=all even with Copilot defaults', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: '1' }], info: { more_records: true } },
+    { data: [{ id: '2' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      retrieval_mode: 'all',
+    });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(
+      requests.map((request) => request.config.params.page),
+      [1, 2]
+    );
+    requests.forEach((request) => {
+      assert.equal(request.config.params.per_page, 200);
+    });
+    assert.deepEqual(result.data, [{ id: '1' }, { id: '2' }]);
+    assert.equal(result.info.count, 2);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service keeps only the requested page when retrieval_mode=page', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: true },
+      },
+    };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      retrieval_mode: 'page',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Leads');
+    assert.equal(requests[0].config.params.page, 1);
+    assert.equal(requests[0].config.params.per_page, 25);
+    assert.deepEqual(result.data, [{ id: '1' }]);
   } finally {
     zohoClient.get = originalGet;
   }

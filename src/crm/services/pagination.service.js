@@ -9,6 +9,12 @@ const RETRIEVAL_STRATEGIES = {
   COMPLETE_MATCHING_DATASET: 'complete_matching_dataset',
 };
 
+const RETRIEVAL_MODES = {
+  AUTO: 'auto',
+  PAGE: 'page',
+  ALL: 'all',
+};
+
 const FULL_RETRIEVAL_PATTERNS = [
   /\ball\b/,
   /\bevery\b/,
@@ -237,6 +243,20 @@ function inferEqualityCriteria(requestText) {
   return `(${fieldName}:equals:${value})`;
 }
 
+function normalizeRetrievalMode(value) {
+  const normalizedValue = String(value || '').trim().toLowerCase();
+
+  if (
+    normalizedValue === RETRIEVAL_MODES.AUTO
+    || normalizedValue === RETRIEVAL_MODES.PAGE
+    || normalizedValue === RETRIEVAL_MODES.ALL
+  ) {
+    return normalizedValue;
+  }
+
+  return RETRIEVAL_MODES.AUTO;
+}
+
 function logPageResponseDebug({ moduleKey, page, pageToken, info, recordsFetched }) {
   console.debug('[Zoho CRM] Zoho page fetched', {
     Module: moduleKey,
@@ -263,6 +283,27 @@ function logPaginationStopDebug({ moduleKey, page, pageToken, reason, info }) {
 
 function getRetrievalPlan(moduleDefinition, options = {}) {
   const requestText = getRequestText(options);
+  const retrievalMode = normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode);
+
+  if (retrievalMode === RETRIEVAL_MODES.ALL) {
+    return {
+      strategy: RETRIEVAL_STRATEGIES.COMPLETE_MATCHING_DATASET,
+      fetchAll: true,
+      params: {},
+      reason: 'retrieval_mode_all',
+      retrievalMode,
+    };
+  }
+
+  if (retrievalMode === RETRIEVAL_MODES.PAGE) {
+    return {
+      strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
+      fetchAll: false,
+      params: {},
+      reason: 'retrieval_mode_page',
+      retrievalMode,
+    };
+  }
 
   if (hasExplicitPagination(options, requestText)) {
     return {
@@ -270,6 +311,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       fetchAll: false,
       params: {},
       reason: 'explicit_pagination',
+      retrievalMode,
     };
   }
 
@@ -279,6 +321,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       fetchAll: false,
       params: {},
       reason: 'explicit_ids',
+      retrievalMode,
     };
   }
 
@@ -294,6 +337,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       reason: hasExplicitFilter(options) || inferredCriteria
         ? 'filtered_complete_dataset'
         : 'complete_analysis_intent',
+      retrievalMode,
     };
   }
 
@@ -311,6 +355,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
         per_page: requestedPerPage || DEFAULT_PER_PAGE,
       },
       reason: requestedPage ? 'requested_page' : 'requested_per_page',
+      retrievalMode,
     };
   }
 
@@ -326,6 +371,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
         per_page: requestedLimit,
       },
       reason: 'requested_limited_count',
+      retrievalMode,
     };
   }
 
@@ -345,6 +391,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
         ...(criteria ? { criteria } : {}),
       },
       reason: 'specific_record_intent',
+      retrievalMode,
     };
   }
 
@@ -356,6 +403,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       per_page: DEFAULT_LIMITED_PER_PAGE,
     },
     reason: 'default_paginated_list',
+    retrievalMode,
   };
 }
 
@@ -483,6 +531,8 @@ module.exports = {
   getRetrievalPlan,
   hasExplicitPagination,
   RETRIEVAL_STRATEGIES,
+  RETRIEVAL_MODES,
   SINGLE_RECORD_PER_PAGE,
   getRequestText,
+  normalizeRetrievalMode,
 };
