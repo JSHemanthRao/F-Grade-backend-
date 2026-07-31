@@ -20,7 +20,7 @@
         "operationId": "getCrmQuery",
         "tags": ["CRM"],
         "summary": "Query Zoho CRM modules (read-only)",
-        "description": "Read-only query endpoint. Use the 'module' query parameter to select which Zoho CRM module to query (e.g., Leads, Contacts, Deals, Events). Supports pagination, field selection, filter criteria, and explicit ids. This endpoint does not create, update, or delete records.",
+        "description": "Read-only query endpoint. Use the 'module' query parameter to select which Zoho CRM module to query (e.g., Leads, Contacts, Deals, Events). Supports retrieval_mode selection, pagination when needed, field selection, filter criteria, and explicit ids. This endpoint does not create, update, or delete records.",
         "parameters": [
           {
             "name": "module",
@@ -34,14 +34,14 @@
             "in": "query",
             "required": false,
             "schema": { "type": "integer", "minimum": 1, "default": 1 },
-            "description": "Page number for pagination. Defaults to 1."
+            "description": "Optional page number for paginated requests only. Not required for retrieval_mode=count or retrieval_mode=all."
           },
           {
             "name": "per_page",
             "in": "query",
             "required": false,
             "schema": { "type": "integer", "minimum": 1, "default": 25 },
-            "description": "Number of records per page. Defaults to 25. Maximum depends on Zoho CRM limits."
+            "description": "Optional records-per-page value for paginated requests only. Not required for retrieval_mode=count or retrieval_mode=all. Maximum depends on Zoho CRM limits."
           },
           {
             "name": "retrieval_mode",
@@ -49,10 +49,10 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["auto", "page", "all"],
+              "enum": ["auto", "page", "all", "count"],
               "default": "auto"
             },
-            "description": "Controls CRM record retrieval. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, counts, totals, how many, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
+            "description": "Controls CRM record retrieval. Use 'count' whenever the user's request asks for how many, total, count, or similar filtered count answers and only the record count is needed. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
           },
           {
             "name": "fields",

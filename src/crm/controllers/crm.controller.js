@@ -14,20 +14,21 @@ function sendStandardResponse(req, res, moduleDefinition, result, executionTime)
       ? result.users
       : [];
   const info = result?.info || {};
+  const isCountResponse = info?.retrievalStrategy === 'count';
 
   const count = Number.isFinite(info.count)
     ? info.count
     : data.length;
   const requestSource = req.method === 'POST' ? req.body : req.query;
-  const pageValue = requestSource?.page ?? info.page;
-  const perPageValue = requestSource?.per_page ?? info.per_page;
+  const pageValue = isCountResponse ? undefined : (requestSource?.page ?? info.page);
+  const perPageValue = isCountResponse ? undefined : (requestSource?.per_page ?? info.per_page);
 
-  const page = Number.isFinite(Number(pageValue))
-    ? Number(pageValue)
-    : 1;
-  const per_page = Number.isFinite(Number(perPageValue))
-    ? Number(perPageValue)
-    : data.length;
+  const page = isCountResponse
+    ? undefined
+    : (Number.isFinite(Number(pageValue)) ? Number(pageValue) : 1);
+  const per_page = isCountResponse
+    ? undefined
+    : (Number.isFinite(Number(perPageValue)) ? Number(perPageValue) : data.length);
 
   res.json({
     success: true,

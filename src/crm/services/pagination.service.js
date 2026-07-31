@@ -15,6 +15,7 @@ const RETRIEVAL_MODES = {
   AUTO: 'auto',
   PAGE: 'page',
   ALL: 'all',
+  COUNT: 'count',
 };
 
 const FULL_RETRIEVAL_PATTERNS = [
@@ -64,6 +65,7 @@ const COUNT_INTENT_PATTERNS = [
 ];
 
 const LIMITED_COUNT_PATTERN = /\b(?:first|latest|recent|newest|last|only|limit(?:ed)?\s+to|show)\s+(\d{1,3})\b/i;
+const NEXT_COUNT_PATTERN = /\bnext\s+(\d{1,3})\b/i;
 const PAGE_PATTERN = /\bpage\s+(\d{1,6})\b/i;
 const PER_PAGE_PATTERN = /\bper_page\s*=\s*(\d{1,6})\b/i;
 const FIELD_EQUALS_PATTERN = /\b(?:where|with)\s+([a-z][a-z0-9_\s]*?)\s*(?:=|equals|is)\s*["']?([^"',?]+)["']?/i;
@@ -261,6 +263,7 @@ function normalizeRetrievalMode(value) {
     normalizedValue === RETRIEVAL_MODES.AUTO
     || normalizedValue === RETRIEVAL_MODES.PAGE
     || normalizedValue === RETRIEVAL_MODES.ALL
+    || normalizedValue === RETRIEVAL_MODES.COUNT
   ) {
     return normalizedValue;
   }
@@ -296,17 +299,17 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
   const requestText = getRequestText(options);
   const retrievalMode = normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode);
 
-  if (retrievalMode === RETRIEVAL_MODES.ALL) {
-    if (hasCountIntent(requestText)) {
-      return {
-        strategy: RETRIEVAL_STRATEGIES.COUNT,
-        fetchAll: false,
-        params: {},
-        reason: 'count_intent',
-        retrievalMode,
-      };
-    }
+  if (retrievalMode === RETRIEVAL_MODES.COUNT) {
+    return {
+      strategy: RETRIEVAL_STRATEGIES.COUNT,
+      fetchAll: false,
+      params: {},
+      reason: 'retrieval_mode_count',
+      retrievalMode,
+    };
+  }
 
+  if (retrievalMode === RETRIEVAL_MODES.ALL) {
     return {
       strategy: RETRIEVAL_STRATEGIES.FULL_DATASET,
       fetchAll: true,
@@ -317,10 +320,49 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
   }
 
   if (retrievalMode === RETRIEVAL_MODES.PAGE) {
+    const pageMatch = requestText.match(PAGE_PATTERN);
+    const requestedPage = pageMatch ? parsePositiveInteger(pageMatch[1]) : null;
+    const perPageMatch = requestText.match(PER_PAGE_PATTERN);
+    const requestedPerPage = perPageMatch ? clampPerPage(perPageMatch[1]) : null;
+    const nextCountMatch = requestText.match(NEXT_COUNT_PATTERN);
+    const requestedNextLimit = nextCountMatch ? clampPerPage(nextCountMatch[1]) : null;
+    const limitMatch = requestText.match(LIMITED_COUNT_PATTERN);
+    const requestedLimit = limitMatch ? clampPerPage(limitMatch[1]) : null;
+    const hasNonDefaultPagination = hasExplicitPagination(options, requestText);
+
+    if (!hasNonDefaultPagination && requestedNextLimit) {
+      return {
+        strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
+        fetchAll: false,
+        params: {
+          page: 2,
+          per_page: requestedNextLimit,
+        },
+        reason: 'requested_next_page',
+        retrievalMode,
+      };
+    }
+
+    if (!hasNonDefaultPagination && (requestedPage || requestedPerPage || requestedLimit)) {
+      return {
+        strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
+        fetchAll: false,
+        params: {
+          page: requestedPage || 1,
+          per_page: requestedPerPage || requestedLimit || DEFAULT_PER_PAGE,
+        },
+        reason: requestedPage ? 'requested_page' : 'requested_per_page',
+        retrievalMode,
+      };
+    }
+
     return {
       strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
       fetchAll: false,
-      params: {},
+      params: {
+        page: Number(options.page || 1),
+        per_page: Number(options.per_page || DEFAULT_LIMITED_PER_PAGE),
+      },
       reason: 'retrieval_mode_page',
       retrievalMode,
     };

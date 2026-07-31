@@ -32,12 +32,12 @@ const spec = {
     parameters: {
       Module: { name: 'module', in: 'query', schema: { type: 'string' }, description: 'CRM module key' },
       Page: { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Page number' },
-      PerPage: { name: 'per_page', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Records per page' },
+      PerPage: { name: 'per_page', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Records per page for paginated requests only' },
       RetrievalMode: {
         name: 'retrieval_mode',
         in: 'query',
-        schema: { type: 'string', enum: ['auto', 'page', 'all'], default: 'auto' },
-        description: "Controls CRM record retrieval. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, counts, totals, how many, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
+        schema: { type: 'string', enum: ['auto', 'page', 'all', 'count'], default: 'auto' },
+        description: "Controls CRM record retrieval. Use 'count' whenever the user's request asks for how many, total, count, or similar filtered count answers and only the record count is needed. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
       },
       Ids: { name: 'ids', in: 'query', schema: { type: 'string' }, description: 'Comma-separated ids' },
       Fields: { name: 'fields', in: 'query', schema: { type: 'string' }, description: 'Comma-separated fields' },

@@ -4,6 +4,7 @@ const router = require('../src/crm/routes');
 const controller = require('../src/crm/controllers/crm.controller');
 const recordsService = require('../src/crm/services/records.service');
 const { zohoClient } = require('../src/common/config/axios');
+const openapiSpec = require('../src/crm/openapi/crm.openapi.json');
 
 const expectedRoutes = [
   '/',
@@ -158,6 +159,22 @@ test('CRM controller forwards retrieval_mode from the query string', async () =>
   recordsService.getRecords = originalGetRecords;
 });
 
+test('CRM OpenAPI marks module required and page-related inputs optional', () => {
+  const queryOperation = openapiSpec.paths['/api/crm/query'].get;
+  const parameters = queryOperation.parameters;
+
+  const moduleParam = parameters.find((parameter) => parameter.name === 'module');
+  const pageParam = parameters.find((parameter) => parameter.name === 'page');
+  const perPageParam = parameters.find((parameter) => parameter.name === 'per_page');
+  const retrievalModeParam = parameters.find((parameter) => parameter.name === 'retrieval_mode');
+
+  assert.equal(moduleParam.required, true);
+  assert.equal(pageParam.required, false);
+  assert.equal(perPageParam.required, false);
+  assert.equal(retrievalModeParam.required, false);
+  assert.ok(retrievalModeParam.schema.enum.includes('count'));
+});
+
 test('CRM service applies module fields and forwards Zoho query parameters', async () => {
   const originalGet = zohoClient.get;
   const requests = [];
@@ -247,16 +264,12 @@ test('CRM service uses Zoho count endpoint for count and total questions', async
 
   try {
     const countRequest = await recordsService.getRecords('leads', {
-      page: 1,
-      per_page: 25,
-      retrieval_mode: 'all',
+      retrieval_mode: 'count',
       search: 'How many leads are there in the entire CRM?',
     });
 
     const totalRequest = await recordsService.getRecords('leads', {
-      page: 1,
-      per_page: 25,
-      retrieval_mode: 'all',
+      retrieval_mode: 'count',
       search: 'Total leads',
     });
 
@@ -285,7 +298,7 @@ test('CRM service counts filtered closed won deals without paginating records', 
 
   try {
     const result = await recordsService.getRecords('deals', {
-      retrieval_mode: 'all',
+      retrieval_mode: 'count',
       search: 'How many closed won deals?',
       filters: '(Stage:equals:Closed Won)',
     });
@@ -311,7 +324,7 @@ test('CRM service counts filtered leads from advertisement without record pagina
 
   try {
     const result = await recordsService.getRecords('leads', {
-      retrieval_mode: 'all',
+      retrieval_mode: 'count',
       search: 'How many leads came from Advertisement?',
       filters: '(Lead_Source:equals:Advertisement)',
     });
@@ -555,7 +568,7 @@ test('CRM service switches to next_page_token after 2000 records', async () => {
   }
 });
 
-test('CRM service uses one bounded request for limited count prompts', async () => {
+test('CRM service uses page mode for first 30 leads', async () => {
   const originalGet = zohoClient.get;
   const requests = [];
 
@@ -571,13 +584,48 @@ test('CRM service uses one bounded request for limited count prompts', async () 
 
   try {
     const result = await recordsService.getRecords('leads', {
-      search: 'Show first 20 leads',
+      page: 1,
+      per_page: 25,
+      retrieval_mode: 'page',
+      search: 'First 30 leads',
     });
 
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, '/crm/v8/Leads');
     assert.equal(requests[0].config.params.page, 1);
-    assert.equal(requests[0].config.params.per_page, 20);
+    assert.equal(requests[0].config.params.per_page, 30);
+    assert.deepEqual(result.data, [{ id: '1' }]);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service uses page 2 for next 30 leads', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: true },
+      },
+    };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      page: 1,
+      per_page: 25,
+      retrieval_mode: 'page',
+      search: 'Next 30 leads',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Leads');
+    assert.equal(requests[0].config.params.page, 2);
+    assert.equal(requests[0].config.params.per_page, 30);
     assert.deepEqual(result.data, [{ id: '1' }]);
   } finally {
     zohoClient.get = originalGet;
