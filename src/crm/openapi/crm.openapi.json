@@ -1,5 +1,5 @@
 {
-  "openapi": "3.0.3",
+  "swagger": "2.0",
   "info": {
     "title": "F-Grade Zoho CRM API",
     "version": "1.0.0",
@@ -10,172 +10,151 @@
     }
   },
   "security": [],
-  "servers": [
-    {
-      "url": "https://f-grade-backend.onrender.com",
-      "description": "Public ngrok URL for Copilot Studio integration"
-    }
-  ],
-  "tags": [
-    { "name": "CRM", "description": "Read-only Zoho CRM query operations" }
-  ],
+  "host": "f-grade-backend.onrender.com",
+  "basePath": "/",
+  "schemes": ["https"],
+  "produces": ["application/json"],
   "paths": {
     "/api/crm/query": {
       "get": {
-        "operationId": "getCrmQuery",
+        "operationId": "queryZohoCRM",
         "tags": ["CRM"],
         "summary": "Query Zoho CRM modules (read-only)",
-        "description": "Read-only query endpoint. Use the 'module' query parameter to select which Zoho CRM module to query (e.g., Leads, Contacts, Deals, Events). Supports retrieval_mode selection, pagination when needed, field selection, filter criteria, and explicit ids. This endpoint does not create, update, or delete records.",
+        "description": "Read-only query endpoint for Zoho CRM modules. Module is required. Use retrieval_mode=count for count questions, retrieval_mode=all for complete datasets, and retrieval_mode=page for paginated requests.",
         "parameters": [
           {
             "name": "module",
             "in": "query",
             "required": true,
-            "schema": { "type": "string", "example": "Leads" },
-            "description": "Canonical or natural-language module name. Examples: Leads, Lead, Contacts, Contact, Deals, Deal, Events, Meeting. Matching is case-insensitive and trimmed. Aliases are resolved by the backend."
+            "type": "string",
+            "description": "Canonical or natural-language module name. Examples: Leads, Contacts, Accounts, Deals."
           },
           {
             "name": "page",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "minimum": 1, "default": 1 },
-            "description": "Optional page number for paginated requests only. Not required for retrieval_mode=count or retrieval_mode=all."
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "description": "Optional page number for paginated requests."
           },
           {
             "name": "per_page",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "minimum": 1, "default": 25 },
-            "description": "Optional records-per-page value for paginated requests only. Not required for retrieval_mode=count or retrieval_mode=all. Maximum depends on Zoho CRM limits."
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "description": "Optional records per page for paginated requests."
           },
           {
             "name": "retrieval_mode",
             "in": "query",
             "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["auto", "page", "all", "count"],
-              "default": "auto"
-            },
-            "description": "Controls CRM record retrieval. Use 'count' whenever the user's request asks for how many, total, count, or similar filtered count answers and only the record count is needed. Use 'all' whenever the user's request requires the complete matching dataset, including requests for all/every records, summaries, analytics, averages, rankings, comparisons, aggregations, complete filtered results, or calculations requiring all matching records. Use 'page' for ordinary list requests or explicitly requested pagination. Use 'auto' otherwise."
+            "type": "string",
+            "enum": ["auto", "page", "all", "count"],
+            "default": "auto",
+            "description": "Controls CRM record retrieval. Use 'count' for how many, total, count, or number of records. Use 'all' for the complete matching dataset. Use 'page' for limited or paginated requests such as first 30, next 30, or page 2. Use 'auto' otherwise."
           },
           {
             "name": "fields",
             "in": "query",
             "required": false,
-            "schema": { "type": "string", "example": "First_Name,Last_Name,Email" },
-            "description": "Comma-separated list of field API names to include in each record. If omitted, a default field set is returned by the CRM service."
+            "type": "string",
+            "description": "Optional comma-separated field API names to include in each record."
           },
           {
-            "name": "filter",
+            "name": "filters",
             "in": "query",
             "required": false,
-            "schema": { "type": "string", "example": "((Lead_Status:equals:Open))" },
-            "description": "Zoho CRM criteria string for server-side filtering. Use Zoho's criteria syntax. If provided, this overrides basic 'search' style parameters."
+            "type": "string",
+            "description": "Optional Zoho CRM criteria string for server-side filtering."
           },
           {
             "name": "ids",
             "in": "query",
             "required": false,
-            "schema": { "type": "string", "example": "12345,67890" },
-            "description": "Comma-separated list of CRM record ids to fetch. When provided, pagination parameters may be ignored."
+            "type": "string",
+            "description": "Optional comma-separated list of CRM record ids to fetch."
           }
         ],
         "responses": {
           "200": {
             "description": "Successful CRM response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean" },
-                    "module": { "type": "string" },
-                    "count": { "type": "integer" },
-                    "page": { "type": "integer" },
-                    "per_page": { "type": "integer" },
-                    "executionTime": { "type": "string" },
-                    "source": { "type": "string" },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": true
-                      }
-                    }
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean"
+                },
+                "module": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "page": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "per_page": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "executionTime": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
                   }
                 }
               }
             }
           },
           "400": {
-            "description": "Validation error (invalid parameters)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean" },
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": { "type": "string" },
-                        "message": { "type": "string" },
-                        "details": {
-                          "type": "object",
-                          "additionalProperties": true
-                        }
-                      }
-                    }
-                  }
+            "description": "Validation error",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
                 }
               }
             }
           },
           "401": {
             "description": "Authentication required or invalid OAuth token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean" },
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": { "type": "string" },
-                        "message": { "type": "string" },
-                        "details": {
-                          "type": "object",
-                          "additionalProperties": true
-                        }
-                      }
-                    }
-                  }
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
                 }
               }
             }
           },
           "500": {
             "description": "Server error or Zoho API error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean" },
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": { "type": "string" },
-                        "message": { "type": "string" },
-                        "details": {
-                          "type": "object",
-                          "additionalProperties": true
-                        }
-                      }
-                    }
-                  }
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
                 }
               }
             }
