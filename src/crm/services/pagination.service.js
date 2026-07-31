@@ -425,8 +425,11 @@ async function fetchAllPages({
       ...baseParams,
       per_page: perPage,
     };
+    const hasPageToken = Boolean(pageToken);
+    const mode = hasPageToken ? 'page_token' : 'page';
 
-    if (pageToken) {
+    if (hasPageToken) {
+      delete params.page;
       params.page_token = pageToken;
     } else {
       params.page = page;
@@ -437,6 +440,14 @@ async function fetchAllPages({
     const info = payload?.info || {};
 
     lastPayload = payload || {};
+
+    console.debug('[Zoho CRM] Pagination request', {
+      Module: moduleKey,
+      mode,
+      page: params.page ?? null,
+      hasPageToken,
+      recordsReceived: pageRecords.length,
+    });
 
     logPageResponseDebug({
       moduleKey,
@@ -476,7 +487,7 @@ async function fetchAllPages({
 
     const nextPageToken = info.next_page_token;
 
-    if (pageToken) {
+    if (hasPageToken) {
       if (!nextPageToken) {
         logPaginationStopDebug({
           moduleKey,
