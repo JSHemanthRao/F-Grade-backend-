@@ -237,26 +237,27 @@ function inferEqualityCriteria(requestText) {
   return `(${fieldName}:equals:${value})`;
 }
 
-function logPageResponseDebug({ page, pageToken, info, recordsFetched, dataKey }) {
-  console.debug('[Zoho CRM] Zoho response debug', {
-    page,
-    page_token: pageToken || null,
-    dataKey,
+function logPageResponseDebug({ moduleKey, page, pageToken, info, recordsFetched }) {
+  console.debug('[Zoho CRM] Zoho page fetched', {
+    Module: moduleKey,
+    'Zoho page fetched': page,
+    'Records on page': recordsFetched,
     'info.count': info?.count ?? null,
     'info.more_records': info?.more_records ?? null,
     next_page_token: info?.next_page_token ?? null,
-    recordsFetched,
+    page_token: pageToken || null,
   });
 }
 
-function logPaginationStopDebug({ page, pageToken, reason, info }) {
+function logPaginationStopDebug({ moduleKey, page, pageToken, reason, info }) {
   console.debug('[Zoho CRM] Pagination stopped', {
-    page,
-    page_token: pageToken || null,
+    Module: moduleKey,
+    'Zoho page fetched': page,
     reason,
     'info.count': info?.count ?? null,
     'info.more_records': info?.more_records ?? null,
     next_page_token: info?.next_page_token ?? null,
+    page_token: pageToken || null,
   });
 }
 
@@ -359,6 +360,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
 }
 
 async function fetchAllPages({
+  moduleKey = null,
   fetchPage,
   baseParams = {},
   dataKey = 'data',
@@ -389,11 +391,11 @@ async function fetchAllPages({
     lastPayload = payload || {};
 
     logPageResponseDebug({
+      moduleKey,
       page,
       pageToken,
       info,
       recordsFetched: pageRecords.length,
-      dataKey,
     });
 
     if (onPageFetched) {
@@ -402,6 +404,7 @@ async function fetchAllPages({
 
     if (pageRecords.length === 0) {
       logPaginationStopDebug({
+        moduleKey,
         page,
         pageToken,
         reason: 'empty_page',
@@ -414,6 +417,7 @@ async function fetchAllPages({
 
     if (info.more_records !== true) {
       logPaginationStopDebug({
+        moduleKey,
         page,
         pageToken,
         reason: 'info.more_records=false',
@@ -427,6 +431,7 @@ async function fetchAllPages({
     if (pageToken) {
       if (!nextPageToken) {
         logPaginationStopDebug({
+          moduleKey,
           page,
           pageToken,
           reason: 'missing_next_page_token_after_page_token',
@@ -442,6 +447,7 @@ async function fetchAllPages({
     if (page * perPage >= MAX_PAGE_RECORDS) {
       if (!nextPageToken) {
         logPaginationStopDebug({
+          moduleKey,
           page,
           pageToken,
           reason: 'missing_next_page_token_after_2000_records',

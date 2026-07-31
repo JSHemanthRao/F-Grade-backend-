@@ -197,6 +197,43 @@ test('CRM service automatically merges all Zoho pages when pagination is not exp
   }
 });
 
+test('CRM service fetches beyond page 1 for complete dataset requests on any module', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: Array.from({ length: 25 }, (_, index) => ({ id: `task-${index + 1}` })), info: { more_records: true } },
+    { data: Array.from({ length: 25 }, (_, index) => ({ id: `task-${index + 26}` })), info: { more_records: true } },
+    { data: Array.from({ length: 2 }, (_, index) => ({ id: `task-${index + 51}` })), info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('tasks', {
+      page: 1,
+      per_page: 25,
+      search: 'Show all Tasks',
+    });
+
+    assert.equal(requests.length, 3);
+    assert.deepEqual(
+      requests.map((request) => request.config.params.page),
+      [1, 2, 3]
+    );
+    requests.forEach((request) => {
+      assert.equal(request.url, '/crm/v8/Tasks');
+      assert.equal(request.config.params.per_page, 200);
+    });
+    assert.equal(result.data.length, 52);
+    assert.equal(result.info.count, 52);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
 test('CRM service ignores Copilot default pagination for complete and filtered requests', async () => {
   const originalGet = zohoClient.get;
   const requests = [];

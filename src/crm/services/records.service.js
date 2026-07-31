@@ -178,7 +178,7 @@ function logRetrievalComplete(moduleKey, pagesFetched, totalRecords) {
   console.debug('[Zoho CRM] Retrieval complete', {
     module: moduleKey,
     'Pages fetched': pagesFetched,
-    'Total records retrieved': totalRecords,
+    'Total merged records': totalRecords,
   });
 }
 
@@ -263,6 +263,7 @@ async function getRecords(moduleKey, options = {}) {
       if (shouldFetchAllPages) {
         let pagesFetched = 0;
         const responseData = await fetchAllPages({
+          moduleKey: normalizedKey,
           dataKey: 'users',
           baseParams: params,
           fetchPage: async (pageParams) => {
@@ -313,6 +314,7 @@ async function getRecords(moduleKey, options = {}) {
       let pagesFetched = 0;
       let totalRecords = 0;
       const result = await fetchAllPages({
+        moduleKey: normalizedKey,
         baseParams: params,
         fetchPage: async (pageParams) => {
           const response = await zohoClient.get(
