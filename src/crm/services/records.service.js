@@ -5,6 +5,8 @@ const {
   DEFAULT_PER_PAGE,
   fetchAllPages,
   getRetrievalPlan,
+  getRequestText,
+  hasExplicitPagination,
 } = require('./pagination.service');
 
 function normalizeModuleKey(moduleKey) {
@@ -180,6 +182,57 @@ function logRetrievalComplete(moduleKey, pagesFetched, totalRecords) {
   });
 }
 
+function getPaginationInterpretation(options, requestText) {
+  const hasPage = options.page !== undefined && options.page !== null && options.page !== '';
+  const hasPerPage = options.per_page !== undefined && options.per_page !== null && options.per_page !== '';
+  const copilotDefaultsApplied = Number(options.page) === 1 && Number(options.per_page) === 25;
+  const explicitPaginationRequested = hasExplicitPagination(options, requestText);
+
+  if (copilotDefaultsApplied && !explicitPaginationRequested) {
+    return {
+      copilotDefaultsApplied: true,
+      explicitPaginationRequested: false,
+      interpretation: 'copilot_defaults',
+    };
+  }
+
+  if (hasPage || hasPerPage) {
+    return {
+      copilotDefaultsApplied,
+      explicitPaginationRequested,
+      interpretation: explicitPaginationRequested ? 'explicit_user_pagination' : 'copilot_defaults',
+    };
+  }
+
+  return {
+    copilotDefaultsApplied: false,
+    explicitPaginationRequested: false,
+    interpretation: 'not_applicable',
+  };
+}
+
+function logPlannerDebug(moduleKey, options, retrievalPlan, moduleDefinition) {
+  const originalUserPrompt = getRequestText(options);
+  const paginationInterpretation = getPaginationInterpretation(options, originalUserPrompt);
+
+  console.debug('[Zoho CRM] Retrieval planner debug', {
+    module: moduleKey,
+    endpoint: moduleDefinition.endpoint,
+    'Original user prompt': originalUserPrompt || null,
+    'Detected retrieval intent': retrievalPlan.strategy,
+    'Retrieval strategy selected': retrievalPlan.strategy === 'single_record'
+      ? 'Single Record'
+      : retrievalPlan.strategy === 'complete_matching_dataset'
+        ? 'Complete Dataset'
+        : 'Paginated List',
+    'Reason for selecting that strategy': retrievalPlan.reason,
+    'page=1 and per_page=25 treated as Copilot defaults or explicit user pagination': paginationInterpretation.interpretation,
+    'fetchAll=true or false': retrievalPlan.fetchAll,
+    'Copilot defaults applied': paginationInterpretation.copilotDefaultsApplied,
+    'Explicit pagination requested': paginationInterpretation.explicitPaginationRequested,
+  });
+}
+
 async function getRecords(moduleKey, options = {}) {
   const normalizedKey = normalizeModuleKey(moduleKey);
   const moduleDefinition = getModuleDefinition(normalizedKey);
@@ -195,6 +248,7 @@ async function getRecords(moduleKey, options = {}) {
     fields: requestedFields,
   } = effectiveOptions;
   const shouldFetchAllPages = retrievalPlan.fetchAll;
+  logPlannerDebug(normalizedKey, options, retrievalPlan, moduleDefinition);
   logRetrievalPlan(normalizedKey, options, retrievalPlan);
 
   if (normalizedKey === 'users') {

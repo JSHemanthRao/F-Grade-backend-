@@ -237,6 +237,29 @@ function inferEqualityCriteria(requestText) {
   return `(${fieldName}:equals:${value})`;
 }
 
+function logPageResponseDebug({ page, pageToken, info, recordsFetched, dataKey }) {
+  console.debug('[Zoho CRM] Zoho response debug', {
+    page,
+    page_token: pageToken || null,
+    dataKey,
+    'info.count': info?.count ?? null,
+    'info.more_records': info?.more_records ?? null,
+    next_page_token: info?.next_page_token ?? null,
+    recordsFetched,
+  });
+}
+
+function logPaginationStopDebug({ page, pageToken, reason, info }) {
+  console.debug('[Zoho CRM] Pagination stopped', {
+    page,
+    page_token: pageToken || null,
+    reason,
+    'info.count': info?.count ?? null,
+    'info.more_records': info?.more_records ?? null,
+    next_page_token: info?.next_page_token ?? null,
+  });
+}
+
 function getRetrievalPlan(moduleDefinition, options = {}) {
   const requestText = getRequestText(options);
 
@@ -365,17 +388,37 @@ async function fetchAllPages({
 
     lastPayload = payload || {};
 
+    logPageResponseDebug({
+      page,
+      pageToken,
+      info,
+      recordsFetched: pageRecords.length,
+      dataKey,
+    });
+
     if (onPageFetched) {
       onPageFetched({ page, pageToken, recordsFetched: pageRecords.length });
     }
 
     if (pageRecords.length === 0) {
+      logPaginationStopDebug({
+        page,
+        pageToken,
+        reason: 'empty_page',
+        info,
+      });
       break;
     }
 
     allRecords.push(...pageRecords);
 
     if (info.more_records !== true) {
+      logPaginationStopDebug({
+        page,
+        pageToken,
+        reason: 'info.more_records=false',
+        info,
+      });
       break;
     }
 
@@ -383,6 +426,12 @@ async function fetchAllPages({
 
     if (pageToken) {
       if (!nextPageToken) {
+        logPaginationStopDebug({
+          page,
+          pageToken,
+          reason: 'missing_next_page_token_after_page_token',
+          info,
+        });
         break;
       }
 
@@ -392,6 +441,12 @@ async function fetchAllPages({
 
     if (page * perPage >= MAX_PAGE_RECORDS) {
       if (!nextPageToken) {
+        logPaginationStopDebug({
+          page,
+          pageToken,
+          reason: 'missing_next_page_token_after_2000_records',
+          info,
+        });
         break;
       }
 
@@ -423,4 +478,5 @@ module.exports = {
   hasExplicitPagination,
   RETRIEVAL_STRATEGIES,
   SINGLE_RECORD_PER_PAGE,
+  getRequestText,
 };
