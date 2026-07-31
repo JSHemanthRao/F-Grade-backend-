@@ -4,7 +4,7 @@ const { getModuleDefinition } = require('./module-definition.service');
 const {
   DEFAULT_PER_PAGE,
   fetchAllPages,
-  hasExplicitPagination,
+  getRetrievalPlan,
 } = require('./pagination.service');
 
 function normalizeModuleKey(moduleKey) {
@@ -163,15 +163,20 @@ function logRequestError(error, moduleKey, moduleConfig, queryParams, fields) {
 }
 
 async function getRecords(moduleKey, options = {}) {
+  const normalizedKey = normalizeModuleKey(moduleKey);
+  const moduleDefinition = getModuleDefinition(normalizedKey);
+  const retrievalPlan = getRetrievalPlan(moduleDefinition, options);
+  const effectiveOptions = {
+    ...options,
+    ...retrievalPlan.params,
+  };
   const {
     page,
     per_page,
     ids,
     fields: requestedFields,
-  } = options;
-  const normalizedKey = normalizeModuleKey(moduleKey);
-  const moduleDefinition = getModuleDefinition(normalizedKey);
-  const shouldFetchAllPages = !hasExplicitPagination(options);
+  } = effectiveOptions;
+  const shouldFetchAllPages = retrievalPlan.fetchAll;
 
   if (normalizedKey === 'users') {
     console.debug('[Zoho CRM] Calling Users API');
@@ -220,7 +225,7 @@ async function getRecords(moduleKey, options = {}) {
     }
   }
 
-  const { params, fields: responseFields } = buildQueryParams(normalizedKey, options);
+  const { params, fields: responseFields } = buildQueryParams(normalizedKey, effectiveOptions);
 
   logRequestDebug(normalizedKey, moduleDefinition, params, responseFields);
 

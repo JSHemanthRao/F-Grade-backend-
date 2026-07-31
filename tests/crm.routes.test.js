@@ -237,6 +237,124 @@ test('CRM service switches to next_page_token after 2000 records', async () => {
   }
 });
 
+test('CRM service uses one bounded request for limited count prompts', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: true },
+      },
+    };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      search: 'Show first 20 leads',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Leads');
+    assert.equal(requests[0].config.params.page, 1);
+    assert.equal(requests[0].config.params.per_page, 20);
+    assert.deepEqual(result.data, [{ id: '1' }]);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service treats top and analytics prompts as full retrieval', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: '1' }], info: { more_records: true } },
+    { data: [{ id: '2' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('accounts', {
+      search: 'Top 10 customers',
+    });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(
+      requests.map((request) => request.config.params.page),
+      [1, 2]
+    );
+    requests.forEach((request) => {
+      assert.equal(request.config.params.per_page, 200);
+    });
+    assert.deepEqual(result.data, [{ id: '1' }, { id: '2' }]);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service uses one bounded request for specific record prompts', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: true },
+      },
+    };
+  };
+
+  try {
+    await recordsService.getRecords('deals', {
+      search: 'Show Deal ABC',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Deals');
+    assert.equal(requests[0].config.params.page, 1);
+    assert.equal(requests[0].config.params.per_page, 25);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service does not auto-paginate explicit IDs', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: true },
+      },
+    };
+  };
+
+  try {
+    await recordsService.getRecords('contacts', {
+      ids: ['1'],
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Contacts');
+    assert.equal(requests[0].config.params.ids, '1');
+    assert.equal(requests[0].config.params.page, undefined);
+    assert.equal(requests[0].config.params.per_page, undefined);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
 test('CRM service surfaces Zoho API failures without fallback data', async () => {
   const originalGet = zohoClient.get;
   const error = {
