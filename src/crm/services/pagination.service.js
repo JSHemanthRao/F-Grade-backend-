@@ -1,31 +1,54 @@
 const DEFAULT_PER_PAGE = 200;
 const MAX_PAGE_RECORDS = 2000;
 const DEFAULT_LIMITED_PER_PAGE = 25;
+const SINGLE_RECORD_PER_PAGE = 1;
+
+const RETRIEVAL_STRATEGIES = {
+  SINGLE_RECORD: 'single_record',
+  PAGINATED_LIST: 'paginated_list',
+  COMPLETE_MATCHING_DATASET: 'complete_matching_dataset',
+};
 
 const FULL_RETRIEVAL_PATTERNS = [
   /\ball\b/,
   /\bevery\b/,
   /\bcomplete\b/,
   /\bentire\b/,
+  /\bhow\s+many\b/,
+  /\bnumber\s+of\b/,
   /\bcount\b/,
   /\btotal\b/,
   /\bsum\b/,
   /\bsummary\b/,
+  /\breport\b/,
   /\banalytics?\b/,
   /\bdashboard\b/,
   /\bcompare\b/,
   /\bconversion\b/,
   /\brate\b/,
   /\brevenue\b/,
+  /\bamount\b/,
+  /\baverage\b/,
   /\bhighest\b/,
   /\blowest\b/,
   /\btop\b/,
   /\bmonthly\b/,
   /\bbusiness\s+summary\b/,
+  /\boverdue\b/,
+  /\bclosed\b/,
+  /\bactive\b/,
+  /\bcreated\b/,
+  /\bowned\s+by\b/,
+  /\bwhere\b/,
+  /\bwith\b/,
+  /\bmatching\b/,
+  /\bthis\s+month\b/,
+  /\blast\s+month\b/,
 ];
 
-const LIMITED_COUNT_PATTERN = /\b(?:first|latest|recent|newest|last|only|limit(?:ed)?\s+to|show)\s+(\d{1,3})\b/;
-const PAGE_PATTERN = /\bpage\s+(\d{1,6})\b/;
+const LIMITED_COUNT_PATTERN = /\b(?:first|latest|recent|newest|last|only|limit(?:ed)?\s+to|show)\s+(\d{1,3})\b/i;
+const PAGE_PATTERN = /\bpage\s+(\d{1,6})\b/i;
+const FIELD_EQUALS_PATTERN = /\b(?:where|with)\s+([a-z][a-z0-9_\s]*?)\s*(?:=|equals|is)\s*["']?([^"',?]+)["']?/i;
 
 function hasExplicitPagination(options = {}) {
   return options.page !== undefined && options.page !== null && options.page !== ''
@@ -45,7 +68,7 @@ function normalizeText(value) {
     return Object.values(value).map(normalizeText).filter(Boolean).join(' ');
   }
 
-  return String(value).trim().toLowerCase();
+  return String(value).trim();
 }
 
 function getRequestText(options = {}) {
@@ -62,7 +85,14 @@ function getRequestText(options = {}) {
 }
 
 function hasFullRetrievalIntent(requestText) {
-  return FULL_RETRIEVAL_PATTERNS.some((pattern) => pattern.test(requestText));
+  const normalizedRequestText = String(requestText || '').toLowerCase();
+
+  return FULL_RETRIEVAL_PATTERNS.some((pattern) => pattern.test(normalizedRequestText));
+}
+
+function hasExplicitFilter(options = {}) {
+  return options.criteria !== undefined && options.criteria !== null && options.criteria !== ''
+    || options.filters !== undefined && options.filters !== null && options.filters !== '';
 }
 
 function parsePositiveInteger(value) {
@@ -81,8 +111,8 @@ function clampPerPage(value) {
 }
 
 function getSingularModuleTerms(moduleDefinition = {}) {
-  const label = normalizeText(moduleDefinition.label);
-  const endpoint = normalizeText(moduleDefinition.endpoint).replace(/_/g, ' ');
+  const label = normalizeText(moduleDefinition.label).toLowerCase();
+  const endpoint = normalizeText(moduleDefinition.endpoint).replace(/_/g, ' ').toLowerCase();
   const terms = new Set([label, endpoint]);
 
   Array.from(terms).forEach((term) => {
@@ -96,23 +126,101 @@ function getSingularModuleTerms(moduleDefinition = {}) {
   return Array.from(terms).filter(Boolean).sort((a, b) => b.length - a.length);
 }
 
-function hasSpecificRecordIntent(requestText, moduleDefinition) {
+function getSpecificRecordSearchTerm(requestText, moduleDefinition) {
   if (!requestText) {
-    return false;
+    return null;
   }
 
   const moduleTerms = getSingularModuleTerms(moduleDefinition);
 
-  return moduleTerms.some((term) => {
+  for (const term of moduleTerms) {
     const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`\\b(?:show|get|find|lookup|display)\\s+(?:the\\s+)?${escapedTerm}\\s+\\S+`);
-    return pattern.test(requestText);
-  });
+    const pattern = new RegExp(`\\b(?:show|get|find|lookup|display)\\s+(?:the\\s+)?${escapedTerm}\\s+(.+)$`, 'i');
+    const match = requestText.match(pattern);
+
+    if (match?.[1]) {
+      const searchTerm = match[1]
+        .replace(/[?.!,]+$/g, '')
+        .trim();
+
+      if (searchTerm) {
+        return searchTerm;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getSearchableFields(moduleDefinition = {}) {
+  const fields = Array.isArray(moduleDefinition.defaultFields)
+    ? moduleDefinition.defaultFields
+    : [];
+
+  const preferredFields = fields.filter((field) => (
+    /(^|_)name$/i.test(field)
+    || /name/i.test(field)
+    || /email/i.test(field)
+    || /^subject$/i.test(field)
+    || /title/i.test(field)
+    || /company/i.test(field)
+  ));
+
+  return preferredFields.length > 0 ? preferredFields.slice(0, 4) : fields.slice(0, 2);
+}
+
+function escapeCriteriaValue(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').trim();
+}
+
+function buildOrCriteria(fields, value) {
+  const escapedValue = escapeCriteriaValue(value);
+  const clauses = fields
+    .filter(Boolean)
+    .map((field) => `(${field}:equals:${escapedValue})`);
+
+  if (clauses.length === 0) {
+    return null;
+  }
+
+  return clauses.reduce((criteria, clause) => (
+    criteria ? `(${criteria}or${clause})` : clause
+  ), '');
+}
+
+function normalizeFieldName(fieldLabel) {
+  return String(fieldLabel)
+    .trim()
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join('_')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_{2,}/g, '_');
+}
+
+function inferEqualityCriteria(requestText) {
+  const match = requestText.match(FIELD_EQUALS_PATTERN);
+
+  if (!match?.[1] || !match?.[2]) {
+    return null;
+  }
+
+  const fieldName = normalizeFieldName(match[1]);
+  const value = escapeCriteriaValue(match[2]);
+
+  if (!fieldName || !value) {
+    return null;
+  }
+
+  return `(${fieldName}:equals:${value})`;
 }
 
 function getRetrievalPlan(moduleDefinition, options = {}) {
   if (hasExplicitPagination(options)) {
     return {
+      strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
       fetchAll: false,
       params: {},
       reason: 'explicit_pagination',
@@ -121,6 +229,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
 
   if (options.ids !== undefined && options.ids !== null && options.ids !== '') {
     return {
+      strategy: RETRIEVAL_STRATEGIES.SINGLE_RECORD,
       fetchAll: false,
       params: {},
       reason: 'explicit_ids',
@@ -128,12 +237,18 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
   }
 
   const requestText = getRequestText(options);
+  const inferredCriteria = !hasExplicitFilter(options) && requestText
+    ? inferEqualityCriteria(requestText)
+    : null;
 
-  if (requestText && hasFullRetrievalIntent(requestText)) {
+  if (hasExplicitFilter(options) || inferredCriteria || (requestText && hasFullRetrievalIntent(requestText))) {
     return {
+      strategy: RETRIEVAL_STRATEGIES.COMPLETE_MATCHING_DATASET,
       fetchAll: true,
-      params: {},
-      reason: 'complete_analysis_intent',
+      params: inferredCriteria ? { criteria: inferredCriteria } : {},
+      reason: hasExplicitFilter(options) || inferredCriteria
+        ? 'filtered_complete_dataset'
+        : 'complete_analysis_intent',
     };
   }
 
@@ -142,6 +257,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
 
   if (requestedPage) {
     return {
+      strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
       fetchAll: false,
       params: {
         page: requestedPage,
@@ -156,6 +272,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
 
   if (requestedLimit) {
     return {
+      strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
       fetchAll: false,
       params: {
         page: 1,
@@ -165,21 +282,33 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
     };
   }
 
-  if (hasSpecificRecordIntent(requestText, moduleDefinition)) {
+  const specificSearchTerm = getSpecificRecordSearchTerm(requestText, moduleDefinition);
+
+  if (specificSearchTerm) {
+    const criteria = hasExplicitFilter(options)
+      ? null
+      : buildOrCriteria(getSearchableFields(moduleDefinition), specificSearchTerm);
+
     return {
+      strategy: RETRIEVAL_STRATEGIES.SINGLE_RECORD,
       fetchAll: false,
       params: {
         page: 1,
-        per_page: DEFAULT_LIMITED_PER_PAGE,
+        per_page: SINGLE_RECORD_PER_PAGE,
+        ...(criteria ? { criteria } : {}),
       },
       reason: 'specific_record_intent',
     };
   }
 
   return {
-    fetchAll: true,
-    params: {},
-    reason: 'default_complete_dataset',
+    strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
+    fetchAll: false,
+    params: {
+      page: 1,
+      per_page: DEFAULT_LIMITED_PER_PAGE,
+    },
+    reason: 'default_paginated_list',
   };
 }
 
@@ -264,4 +393,6 @@ module.exports = {
   fetchAllPages,
   getRetrievalPlan,
   hasExplicitPagination,
+  RETRIEVAL_STRATEGIES,
+  SINGLE_RECORD_PER_PAGE,
 };

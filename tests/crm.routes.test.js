@@ -197,6 +197,35 @@ test('CRM service automatically merges all Zoho pages when pagination is not exp
   }
 });
 
+test('CRM service uses one default page for plain module list prompts', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: true },
+      },
+    };
+  };
+
+  try {
+    const result = await recordsService.getRecords('leads', {
+      search: 'Show Leads',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Leads');
+    assert.equal(requests[0].config.params.page, 1);
+    assert.equal(requests[0].config.params.per_page, 25);
+    assert.deepEqual(result.data, [{ id: '1' }]);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
 test('CRM service switches to next_page_token after 2000 records', async () => {
   const originalGet = zohoClient.get;
   const requests = [];
@@ -222,7 +251,9 @@ test('CRM service switches to next_page_token after 2000 records', async () => {
   };
 
   try {
-    const result = await recordsService.getRecords('leads');
+    const result = await recordsService.getRecords('leads', {
+      search: 'How many leads are there?',
+    });
 
     assert.equal(requests.length, 11);
     assert.equal(requests[9].config.params.page, 10);
@@ -320,7 +351,69 @@ test('CRM service uses one bounded request for specific record prompts', async (
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, '/crm/v8/Deals');
     assert.equal(requests[0].config.params.page, 1);
-    assert.equal(requests[0].config.params.per_page, 25);
+    assert.equal(requests[0].config.params.per_page, 1);
+    assert.equal(requests[0].config.params.criteria, '((Deal_Name:equals:ABC)or(Account_Name:equals:ABC))');
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service fetches all pages for explicit filtered requests', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: '1' }], info: { more_records: true } },
+    { data: [{ id: '2' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('contacts', {
+      filters: '(Mailing_City:equals:Hyderabad)',
+      search: 'Show contacts from Hyderabad',
+    });
+
+    assert.equal(requests.length, 2);
+    requests.forEach((request, index) => {
+      assert.equal(request.url, '/crm/v8/Contacts');
+      assert.equal(request.config.params.page, index + 1);
+      assert.equal(request.config.params.per_page, 200);
+      assert.equal(request.config.params.criteria, '(Mailing_City:equals:Hyderabad)');
+    });
+    assert.deepEqual(result.data, [{ id: '1' }, { id: '2' }]);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service infers simple equality filters before complete retrieval', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return {
+      data: {
+        data: [{ id: '1' }],
+        info: { more_records: false },
+      },
+    };
+  };
+
+  try {
+    await recordsService.getRecords('accounts', {
+      search: 'Companies where Invoice Type = RAW',
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/crm/v8/Accounts');
+    assert.equal(requests[0].config.params.page, 1);
+    assert.equal(requests[0].config.params.per_page, 200);
+    assert.equal(requests[0].config.params.criteria, '(Invoice_Type:equals:RAW)');
   } finally {
     zohoClient.get = originalGet;
   }
