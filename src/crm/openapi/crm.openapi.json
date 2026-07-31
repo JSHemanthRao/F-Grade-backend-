@@ -3,8 +3,13 @@
   "info": {
     "title": "F-Grade Zoho CRM API",
     "version": "1.0.0",
-    "description": "Single read-only CRM query endpoint optimized for Microsoft Copilot Studio. Use GET /api/crm/query with query parameters to fetch records from Zoho CRM modules."
+    "description": "Single read-only CRM query endpoint optimized for Microsoft Copilot Studio. Use GET /api/crm/query with query parameters to fetch records from Zoho CRM modules.",
+    "license": {
+      "name": "ISC",
+      "url": "https://spdx.org/licenses/ISC.html"
+    }
   },
+  "security": [],
   "servers": [
     {
       "url": "https://f-grade-backend.onrender.com",
@@ -81,12 +86,24 @@
             "description": "Successful CRM response",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CRMResponse" },
-                "examples": {
-                  "LeadsExample": { "$ref": "#/components/examples/LeadsExample" },
-                  "ContactsExample": { "$ref": "#/components/examples/ContactsExample" },
-                  "DealsExample": { "$ref": "#/components/examples/DealsExample" },
-                  "EventsExample": { "$ref": "#/components/examples/EventsExample" }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "module": { "type": "string" },
+                    "count": { "type": "integer" },
+                    "page": { "type": "integer" },
+                    "per_page": { "type": "integer" },
+                    "executionTime": { "type": "string" },
+                    "source": { "type": "string" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -95,112 +112,75 @@
             "description": "Validation error (invalid parameters)",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CRMErrorResponse" },
-                "examples": { "InvalidModule": { "$ref": "#/components/examples/InvalidModuleExample" } }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           },
           "401": {
             "description": "Authentication required or invalid OAuth token",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CRMErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "500": {
             "description": "Server error or Zoho API error",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CRMErrorResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "CRMRecord": {
-        "type": "object",
-        "description": "A single CRM record returned from Zoho. Field names are module-specific.",
-        "additionalProperties": true
-      },
-      "CRMResponse": {
-        "type": "object",
-        "required": ["success","module","count","data"],
-        "properties": {
-          "success": { "type": "boolean", "description": "True when the operation completed successfully." },
-          "module": { "type": "string", "description": "Canonical module name used for this response." },
-          "count": { "type": "integer", "description": "Number of records returned in 'data'." },
-          "page": { "type": "integer", "description": "Page number (if pagination applied)." },
-          "per_page": { "type": "integer", "description": "Records per page (if pagination applied)." },
-          "executionTime": { "type": "string", "description": "Human-readable execution time or timestamp for diagnostics." },
-          "source": { "type": "string", "description": "Data source, e.g., 'Zoho CRM'." },
-          "data": { "type": "array", "items": { "$ref": "#/components/schemas/CRMRecord" }, "description": "Array of CRM records." }
-        }
-      },
-      "CRMErrorResponse": {
-        "type": "object",
-        "required": ["success","error"],
-        "properties": {
-          "success": { "type": "boolean", "enum": [false] },
-          "error": { "type": "object", "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } }
-        }
-      }
-    },
-    "examples": {
-      "LeadsExample": {
-        "summary": "Example response for Leads module",
-        "value": {
-          "success": true,
-          "module": "Leads",
-          "count": 2,
-          "page": 1,
-          "per_page": 25,
-          "executionTime": "15ms",
-          "source": "Zoho CRM",
-          "data": [
-            { "id": "1000000001", "First_Name": "Alice", "Last_Name": "Smith", "Email": "alice@example.com", "Company": "Acme Corp" },
-            { "id": "1000000002", "First_Name": "Bob", "Last_Name": "Jones", "Email": "bob@example.com", "Company": "Contoso Ltd" }
-          ]
-        }
-      },
-      "ContactsExample": {
-        "summary": "Example response for Contacts module",
-        "value": {
-          "success": true,
-          "module": "Contacts",
-          "count": 1,
-          "page": 1,
-          "per_page": 25,
-          "executionTime": "12ms",
-          "source": "Zoho CRM",
-          "data": [ { "id": "20000001", "Full_Name": "Charlie Brown", "Email": "charlie@example.com", "Phone": "+1-555-0100" } ]
-        }
-      },
-      "DealsExample": {
-        "summary": "Example response for Deals module",
-        "value": {
-          "success": true,
-          "module": "Deals",
-          "count": 1,
-          "page": 1,
-          "per_page": 25,
-          "executionTime": "20ms",
-          "source": "Zoho CRM",
-          "data": [ { "id": "3000001", "Deal_Name": "Big Contract", "Amount": 75000, "Stage": "Negotiation" } ]
-        }
-      },
-      "EventsExample": {
-        "summary": "Example response for Events/Meetings module",
-        "value": {
-          "success": true,
-          "module": "Events",
-          "count": 1,
-          "page": 1,
-          "per_page": 25,
-          "executionTime": "10ms",
-          "source": "Zoho CRM",
-          "data": [ { "id": "4000001", "Subject": "Project Kickoff", "Start_DateTime": "2026-07-01T09:00:00Z", "End_DateTime": "2026-07-01T10:00:00Z", "Location": "Zoom" } ]
-        }
-      },
-      "InvalidModuleExample": {
-        "summary": "Example invalid module error",
-        "value": { "success": false, "error": { "code": "INVALID_MODULE", "message": "Unknown module 'Foo'. Allowed modules: Leads, Contacts, Accounts, Deals, Tasks, Events, Calls, Notes, Products, Vendors, Quotes, Sales_Orders, Purchase_Orders, Campaigns, Cases, Solutions, Users, Renewal_Accounts, Org." } }
       }
     }
   }
