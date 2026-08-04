@@ -1,5 +1,5 @@
 const express = require('express');
-const { getModuleCount, getModuleQuery } = require('../controllers/crm.controller');
+const { getModuleCount, getModuleQuery, handleAssistantRequest } = require('../controllers/crm.controller');
 const { getSupportedModuleKeys } = require('../services/module-definition.service');
 const { validateCRMCountRequest, validateCRMQueryRequest } = require('../validators/crm.validator');
 const { requestLogger } = require('../middleware/request-logger');
@@ -17,6 +17,7 @@ supportedModules.forEach((moduleName) => {
 // New primary read-only dynamic endpoint
 router.get('/count', validateCRMCountRequest, getModuleCount);
 router.get('/query', validateCRMQueryRequest, getModuleQuery);
+router.post('/assistant', handleAssistantRequest);
 
 // Keep root for backward compatibility (resolves module by route path)
 router.get('/', validateCRMQueryRequest, getModuleQuery);

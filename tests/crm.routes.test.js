@@ -45,10 +45,54 @@ test('CRM router exposes one GET route per requested module', () => {
     .map((layer) => layer.route.path)
     .sort();
 
-  assert.equal(registeredRoutes.length, expectedRoutes.length);
+  assert.equal(registeredRoutes.length, expectedRoutes.length + 1);
   expectedRoutes.forEach((route) => {
     assert.ok(registeredRoutes.includes(route), `${route} should be registered`);
   });
+  assert.ok(registeredRoutes.includes('/assistant'));
+});
+
+test('CRM assistant endpoint accepts only a question and routes count requests internally', async () => {
+  const originalGetCount = recordsService.getCount;
+  let receivedOptions;
+
+  recordsService.getCount = async (_moduleName, options) => {
+    receivedOptions = options;
+    return { data: [], info: { count: 12 } };
+  };
+
+  const req = {
+    method: 'POST',
+    body: {
+      question: 'How many leads are there?',
+      page: 2,
+      per_page: 10,
+      module: 'leads',
+    },
+    route: { path: '/assistant' },
+  };
+  const res = {
+    statusCode: 200,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+    },
+  };
+
+  await controller.handleAssistantRequest(req, res, () => {});
+
+  assert.equal(receivedOptions.question, 'How many leads are there?');
+  assert.equal(receivedOptions.retrieval_mode, 'count');
+  assert.equal(receivedOptions.page, undefined);
+  assert.equal(receivedOptions.per_page, undefined);
+  assert.equal(res.payload.success, true);
+  assert.equal(res.payload.intent, 'count');
+  assert.equal(res.payload.count, 12);
+
+  recordsService.getCount = originalGetCount;
 });
 
 test('CRM controller resolves the requested module from the matched route path', async () => {
