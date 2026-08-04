@@ -2,6 +2,7 @@ const recordsService = require('../services/records.service');
 const { resolveRequestedModule } = require('../validators/crm.validator');
 const { getModuleDefinition } = require('../services/module-definition.service');
 const { ALIAS_MAP } = require('../services/module-alias.service');
+const assistantEngine = require('../services/assistant-engine.service');
 
 function formatExecutionTime(startTime) {
   const elapsedNanoSeconds = process.hrtime.bigint() - startTime;
@@ -72,25 +73,6 @@ function buildCommonOptions(req) {
     question: requestSource?.question,
     prompt: requestSource?.prompt,
     message: requestSource?.message,
-    sort_by: requestSource?.sort_by,
-    sort_order: requestSource?.sort_order,
-  };
-}
-
-function buildAssistantOptions(req) {
-  const requestSource = req.method === 'POST' ? req.body : req.query;
-  const question = String(requestSource?.question || requestSource?.prompt || requestSource?.message || '').trim();
-
-  return {
-    question,
-    requestText: question,
-    userQuery: question,
-    search: question,
-    filter: requestSource?.filter ?? requestSource?.filters,
-    filters: requestSource?.filter ?? requestSource?.filters,
-    criteria: requestSource?.criteria,
-    fields: requestSource?.fields,
-    ids: requestSource?.ids,
     sort_by: requestSource?.sort_by,
     sort_order: requestSource?.sort_order,
   };
@@ -173,22 +155,13 @@ async function getModuleCount(req, res, next) {
 
 async function handleAssistantRequest(req, res, next) {
   try {
-    const assistantOptions = buildAssistantOptions(req);
-    const question = assistantOptions.question;
+    const requestSource = req.method === 'POST' ? req.body : req.query;
+    const question = String(requestSource?.question || requestSource?.prompt || requestSource?.message || '').trim();
     const explicitModuleKey = resolveRequestedModule(req);
     const inferredModuleKey = inferModuleKeyFromQuestion(question);
     const moduleKey = explicitModuleKey || inferredModuleKey;
     const moduleDefinition = getModuleDefinition(moduleKey);
     const startTime = process.hrtime.bigint();
-    const normalizedQuestion = String(question || '').trim().toLowerCase();
-    const isCountIntent = /\b(how many|number of|count(?: of)?|total number(?: of)?|total records?|total leads?|total deals?|total contacts?|total accounts?|total users?)\b/.test(normalizedQuestion);
-    const isContinuationRequest = /\bnext\b/.test(normalizedQuestion) && /\b\d+\b/.test(normalizedQuestion);
-    const isLimitedListRequest = /\b(first|latest|recent|newest|last|top)\b/.test(normalizedQuestion) && /\b\d+\b/.test(normalizedQuestion);
-    const retrievalMode = isCountIntent ? 'count' : (isContinuationRequest || isLimitedListRequest ? 'page' : 'auto');
-    const options = {
-      ...assistantOptions,
-      retrieval_mode: retrievalMode,
-    };
 
     if (!moduleDefinition) {
       return res.status(400).json({ success: false, message: 'Unsupported CRM module.' });
@@ -199,40 +172,17 @@ async function handleAssistantRequest(req, res, next) {
     }
 
     console.info('[Zoho CRM] Operation selected', {
-      module: moduleDefinition.label,
+      module: moduleDefinition?.label || 'Unknown',
       operation: 'assistant',
       question,
     });
 
-    if (isCountIntent) {
-      const result = await recordsService.getCount(moduleKey, options);
-      const payload = {
-        success: true,
-        module: moduleDefinition.label,
-        intent: 'count',
-        question,
-        count: result?.info?.count || 0,
-        executionTime: formatExecutionTime(startTime),
-        source: 'Zoho CRM',
-      };
-      return res.json(payload);
-    }
-
-    const result = await recordsService.getRecords(moduleKey, options);
-    const data = Array.isArray(result?.data) ? result.data : [];
-    const info = result?.info || {};
+    const engineResponse = await assistantEngine.handleAssistantRequest({ question, module: moduleKey });
 
     return res.json({
-      success: true,
-      module: moduleDefinition.label,
-      intent: 'query',
-      question,
-      count: Number.isFinite(info.count) ? info.count : data.length,
-      page: 1,
-      per_page: data.length || 25,
+      ...engineResponse,
       executionTime: formatExecutionTime(startTime),
       source: 'Zoho CRM',
-      data,
     });
   } catch (error) {
     return next(error);
