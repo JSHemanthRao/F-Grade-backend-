@@ -40,6 +40,7 @@ const ZOHO_API_DOMAIN = process.env.ZOHO_API_DOMAIN || process.env.API_DOMAIN ||
 module.exports = {
   APP_NAME: process.env.APP_NAME || 'F-Grade Corporate AI Backend',
   NODE_ENV: process.env.NODE_ENV || 'development',
+  DEBUG_ASSISTANT: process.env.DEBUG_ASSISTANT === 'true' || process.env.DEBUG_ASSISTANT === '1',
   PORT: toNumber(process.env.PORT, 3000),
   ZOHO_ACCOUNTS_URL: process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.in',
   ZOHO_API_DOMAIN,

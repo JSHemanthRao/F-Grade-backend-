@@ -9,3 +9,4 @@ const server = app.listen(PORT, () => {
 });
 
 module.exports = server;
+console.log("DEBUG_ASSISTANT =", process.env.DEBUG_ASSISTANT);

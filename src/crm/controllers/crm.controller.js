@@ -1,7 +1,7 @@
+const { DEBUG_ASSISTANT } = require('../../common/config/env');
 const recordsService = require('../services/records.service');
 const { resolveRequestedModule } = require('../validators/crm.validator');
 const { getModuleDefinition } = require('../services/module-definition.service');
-const { ALIAS_MAP } = require('../services/module-alias.service');
 const assistantEngine = require('../services/assistant-engine.service');
 
 function formatExecutionTime(startTime) {
@@ -78,29 +78,6 @@ function buildCommonOptions(req) {
   };
 }
 
-function inferModuleKeyFromQuestion(question) {
-  const normalizedQuestion = String(question || '').trim().toLowerCase();
-
-  if (!normalizedQuestion) {
-    return null;
-  }
-
-  for (const [alias, moduleKey] of Object.entries(ALIAS_MAP)) {
-    if (!alias || alias === moduleKey) {
-      continue;
-    }
-
-    const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`\\b${escapedAlias}\\b`, 'i');
-
-    if (pattern.test(normalizedQuestion)) {
-      return moduleKey;
-    }
-  }
-
-  return null;
-}
-
 async function getModuleQuery(req, res, next) {
   try {
     const moduleKey = resolveRequestedModule(req);
@@ -157,27 +134,30 @@ async function handleAssistantRequest(req, res, next) {
   try {
     const requestSource = req.method === 'POST' ? req.body : req.query;
     const question = String(requestSource?.question || requestSource?.prompt || requestSource?.message || '').trim();
-    const explicitModuleKey = resolveRequestedModule(req);
-    const inferredModuleKey = inferModuleKeyFromQuestion(question);
-    const moduleKey = explicitModuleKey || inferredModuleKey;
-    const moduleDefinition = getModuleDefinition(moduleKey);
     const startTime = process.hrtime.bigint();
-
-    if (!moduleDefinition) {
-      return res.status(400).json({ success: false, message: 'Unsupported CRM module.' });
-    }
 
     if (!question) {
       return res.status(400).json({ success: false, message: 'A question is required.' });
     }
 
-    console.info('[Zoho CRM] Operation selected', {
-      module: moduleDefinition?.label || 'Unknown',
-      operation: 'assistant',
-      question,
-    });
+    if (DEBUG_ASSISTANT) {
+      console.info('[CRM Assistant][Controller]', {
+        receivedRequest: {
+          method: req.method,
+          url: req.originalUrl || req.url,
+          headers: req.headers,
+          body: req.body,
+          query: req.query,
+          params: req.params,
+          ip: req.ip,
+        },
+        question,
+        questionType: 'assistant',
+        questionLength: question.length,
+      });
+    }
 
-    const engineResponse = await assistantEngine.handleAssistantRequest({ question, module: moduleKey });
+    const engineResponse = await assistantEngine.handleAssistantRequest({ question });
 
     return res.json({
       ...engineResponse,

@@ -1,6 +1,7 @@
 const { zohoClient } = require('../../common/config/axios');
-const { NODE_ENV } = require('../../common/config/env');
+const { DEBUG_ASSISTANT, NODE_ENV } = require('../../common/config/env');
 const { getModuleDefinition } = require('./module-definition.service');
+const { buildQueryPlan, isInvalidQueryError } = require('./query-builder.service');
 const {
   DEFAULT_PER_PAGE,
   fetchAllPages,
@@ -178,12 +179,22 @@ function logRetrievalPlan(moduleKey, options, retrievalPlan) {
   });
 }
 
-function logRetrievalComplete(moduleKey, pagesFetched, totalRecords) {
+function logRetrievalComplete(moduleKey, pagesFetched, totalRecords, responseDetails = {}) {
   console.debug('[Zoho CRM] Retrieval complete', {
     module: moduleKey,
     'Pages fetched': pagesFetched,
     'Total merged records': totalRecords,
+    responseDetails,
   });
+
+  if (DEBUG_ASSISTANT) {
+    console.info('[CRM Assistant][Records Service]', {
+      module: moduleKey,
+      pagesFetched,
+      totalRecords,
+      responseDetails,
+    });
+  }
 }
 
 function logCountComplete(moduleKey, count) {
@@ -240,27 +251,21 @@ function buildCountCriteria(moduleKey, moduleDefinition, options = {}, requestTe
 
   const normalizedText = String(requestText || '').toLowerCase();
 
+  const criteriaParts = [];
+
   if (/\bclosed\s+won\b/.test(normalizedText)) {
     const stageField = getPreferredField(moduleDefinition, ['Stage', 'Deal_Stage']);
 
     if (stageField) {
-      return `(${stageField}:equals:Closed Won)`;
+      criteriaParts.push(`(${stageField}:equals:Closed Won)`);
     }
   }
 
-  if (/\bthis\s+month\b/.test(normalizedText)) {
-    const dateField = getPreferredField(moduleDefinition, ['Created_Time', 'Modified_Time', 'Created_Time']);
+  if (/\b(this|last)\s+month\b/.test(normalizedText)) {
+    const dateField = getPreferredField(moduleDefinition, ['Closing_Date', 'Created_Time', 'Modified_Time']);
 
     if (dateField) {
-      return getMonthRangeCriteria(dateField, 0);
-    }
-  }
-
-  if (/\blast\s+month\b/.test(normalizedText)) {
-    const dateField = getPreferredField(moduleDefinition, ['Created_Time', 'Modified_Time', 'Created_Time']);
-
-    if (dateField) {
-      return getMonthRangeCriteria(dateField, -1);
+      criteriaParts.push(getMonthRangeCriteria(dateField, /\blast\s+month\b/.test(normalizedText) ? -1 : 0));
     }
   }
 
@@ -276,7 +281,7 @@ function buildCountCriteria(moduleKey, moduleDefinition, options = {}, requestTe
     return '(Lead_Source:equals:Advertisement)';
   }
 
-  return null;
+  return criteriaParts.length > 0 ? criteriaParts.join('and') : null;
 }
 
 async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
@@ -288,7 +293,23 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
     params.criteria = criteria;
   }
 
+  logGeneratedQuery({
+    mode: 'search',
+    moduleKey,
+    query: `/crm/v8/${moduleDefinition.endpoint}/actions/count${criteria ? `?criteria=${criteria}` : ''}`,
+    whereClause: criteria || null,
+  });
+
   logRequestDebug(moduleKey, moduleDefinition, params, []);
+
+  if (DEBUG_ASSISTANT) {
+    console.info('[CRM Assistant][Records Service][Count]', {
+      module: moduleKey,
+      requestText,
+      criteria,
+      params,
+    });
+  }
 
   const response = await zohoClient.get(
     `/crm/v8/${moduleDefinition.endpoint}/actions/count`,
@@ -296,6 +317,14 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
   );
 
   const count = Number(response.data?.count ?? 0);
+
+  if (DEBUG_ASSISTANT) {
+    console.info('[CRM Assistant][Records Service][Count Result]', {
+      module: moduleKey,
+      count,
+      responseData: response.data,
+    });
+  }
 
   logCountComplete(moduleKey, count);
 
@@ -311,9 +340,50 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
   };
 }
 
+function logGeneratedQuery(queryPlan) {
+  console.info('[Zoho CRM] Generated query', {
+    mode: queryPlan.mode,
+    module: queryPlan.moduleKey,
+    query: queryPlan.query,
+    whereClause: queryPlan.whereClause,
+  });
+}
+
+async function executeCoqlCount(moduleKey, moduleDefinition, queryPlan) {
+  const query = `select count(id) as result_value from ${moduleDefinition.endpoint}${queryPlan.whereClause ? ` where ${queryPlan.whereClause}` : ''}`;
+  console.info('[Zoho CRM] Generated query', { mode: 'coql', module: moduleKey, query });
+  const response = await zohoClient.post('/crm/v8/coql', { select_query: query });
+  const row = response.data?.data?.[0] || {};
+  const count = Number(row.result_value ?? row.count ?? 0);
+  return {
+    data: [],
+    info: { count, more_records: false, page: 1, per_page: 1, retrievalStrategy: 'coql' },
+  };
+}
+
+async function executeCoqlRecords(moduleKey, queryPlan, options = {}) {
+  let query = queryPlan.query;
+  const page = Number(options.page || 1);
+  const perPage = Number(options.per_page || 0);
+  const offset = Number(options.offset ?? ((page - 1) * perPage));
+  if (perPage > 0) query += ` limit ${perPage}${offset > 0 ? ` offset ${offset}` : ''}`;
+  logGeneratedQuery({ ...queryPlan, query });
+  const response = await zohoClient.post('/crm/v8/coql', { select_query: query });
+  const data = Array.isArray(response.data?.data) ? response.data.data : [];
+  return {
+    data,
+    info: { ...(response.data?.info || {}), count: data.length, page, per_page: perPage || data.length, retrievalStrategy: 'coql' },
+  };
+}
+
 async function getCount(moduleKey, options = {}) {
   const normalizedKey = normalizeModuleKey(moduleKey);
   const moduleDefinition = getModuleDefinition(normalizedKey);
+
+  const queryPlan = buildQueryPlan(normalizedKey, options);
+  if (queryPlan.mode === 'coql') {
+    return executeCoqlCount(normalizedKey, moduleDefinition, queryPlan);
+  }
 
   return executeCountRequest(normalizedKey, moduleDefinition, {
     ...options,
@@ -378,6 +448,11 @@ async function getRecords(moduleKey, options = {}) {
     ...options,
     ...retrievalPlan.params,
   };
+  if (!effectiveOptions.criteria && !effectiveOptions.filter && !effectiveOptions.filters) {
+    const inferredCriteria = buildCountCriteria(normalizedKey, moduleDefinition, effectiveOptions, getRequestText(effectiveOptions));
+    if (inferredCriteria) effectiveOptions.criteria = inferredCriteria;
+  }
+  const queryPlan = buildQueryPlan(normalizedKey, effectiveOptions);
   const {
     page,
     per_page,
@@ -395,6 +470,9 @@ async function getRecords(moduleKey, options = {}) {
 
   if (retrievalPlan.strategy === RETRIEVAL_STRATEGIES.COUNT) {
     try {
+      if (queryPlan.mode === 'coql') {
+        return await executeCoqlCount(normalizedKey, moduleDefinition, queryPlan);
+      }
       return await executeCountRequest(normalizedKey, moduleDefinition, options);
     } catch (error) {
       logRequestError(
@@ -404,6 +482,15 @@ async function getRecords(moduleKey, options = {}) {
         error?.config?.params || {},
         []
       );
+      throw error;
+    }
+  }
+
+  if (queryPlan.mode === 'coql') {
+    try {
+      return await executeCoqlRecords(normalizedKey, queryPlan, effectiveOptions);
+    } catch (error) {
+      logRequestError(error, normalizedKey, moduleDefinition, { select_query: queryPlan.query }, queryPlan.fields);
       throw error;
     }
   }
@@ -430,7 +517,10 @@ async function getRecords(moduleKey, options = {}) {
           onPageFetched: () => { pagesFetched += 1; },
         });
 
-        logRetrievalComplete(normalizedKey, pagesFetched, responseData.users?.length || 0);
+        logRetrievalComplete(normalizedKey, pagesFetched, responseData.users?.length || 0, {
+        source: 'users_api',
+        resultPreview: responseData.users?.slice(0, 3) || [],
+      });
 
         return {
           data: responseData.users || [],
@@ -446,7 +536,10 @@ async function getRecords(moduleKey, options = {}) {
         },
       });
 
-      logRetrievalComplete(normalizedKey, 1, response.data.users?.length || 0);
+      logRetrievalComplete(normalizedKey, 1, response.data.users?.length || 0, {
+        source: 'users_api',
+        resultPreview: response.data.users?.slice(0, 3) || [],
+      });
 
       return {
         data: response.data.users || [],
@@ -487,16 +580,28 @@ async function getRecords(moduleKey, options = {}) {
         },
       });
 
-      logRetrievalComplete(normalizedKey, pagesFetched, totalRecords);
+      logRetrievalComplete(normalizedKey, pagesFetched, totalRecords, {
+        source: 'crm_records_api',
+        resultPreview: result?.data?.slice(0, 3) || [],
+      });
       return result;
     }
 
-    const response = await zohoClient.get(
-      `/crm/v8/${moduleDefinition.endpoint}`,
-      { params }
-    );
+    let response;
+    try {
+      logGeneratedQuery({ ...queryPlan, query: `/crm/v8/${moduleDefinition.endpoint}` });
+      response = await zohoClient.get(`/crm/v8/${moduleDefinition.endpoint}`, { params });
+    } catch (error) {
+      if (!isInvalidQueryError(error) || queryPlan.mode !== 'search') throw error;
+      const fallbackPlan = buildQueryPlan(normalizedKey, { ...effectiveOptions, force_coql: true });
+      console.warn('[Zoho CRM] Search query was rejected; retrying with COQL', { module: normalizedKey, reason: error.response?.data });
+      return executeCoqlRecords(normalizedKey, fallbackPlan, effectiveOptions);
+    }
 
-    logRetrievalComplete(normalizedKey, 1, response.data?.data?.length || response.data?.users?.length || 0);
+    logRetrievalComplete(normalizedKey, 1, response.data?.data?.length || response.data?.users?.length || 0, {
+      source: 'crm_records_api',
+      resultPreview: response.data?.data?.slice(0, 3) || response.data?.users?.slice(0, 3) || [],
+    });
 
     return response.data;
   } catch (error) {

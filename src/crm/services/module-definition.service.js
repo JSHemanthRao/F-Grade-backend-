@@ -2,7 +2,7 @@ const MODULE_DEFINITIONS = [
   { key: 'leads', label: 'Leads', endpoint: 'Leads', defaultFields: ['First_Name', 'Last_Name', 'Company', 'Email', 'Phone', 'Lead_Source'] },
   { key: 'contacts', label: 'Contacts', endpoint: 'Contacts', defaultFields: ['First_Name', 'Last_Name', 'Email', 'Phone', 'Mailing_City', 'Mailing_Country'] },
   { key: 'accounts', label: 'Accounts', endpoint: 'Accounts', defaultFields: ['Account_Name', 'Website', 'Phone', 'Industry', 'Annual_Revenue', 'Billing_Country'] },
-  { key: 'deals', label: 'Deals', endpoint: 'Deals', defaultFields: ['Deal_Name', 'Amount', 'Stage', 'Closing_Date', 'Account_Name', 'Deal_Source'] },
+  { key: 'deals', label: 'Deals', endpoint: 'Deals', defaultFields: ['Deal_Name', 'Amount', 'Stage', 'Closing_Date', 'Account_Name', 'Deal_Source', 'Owner'] },
   { key: 'tasks', label: 'Tasks', endpoint: 'Tasks', defaultFields: ['Subject', 'Status', 'Due_Date', 'Owner', 'Priority'] },
   { key: 'events', label: 'Events', endpoint: 'Events', defaultFields: ['Subject', 'Start_DateTime', 'End_DateTime', 'Owner', 'Location'] },
   { key: 'calls', label: 'Calls', endpoint: 'Calls', defaultFields: ['Subject', 'Call_Type', 'Call_Duration', 'Call_Start_Time', 'Status'] },

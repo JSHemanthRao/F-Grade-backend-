@@ -1,0 +1,114 @@
+const { getModuleDefinition } = require('./module-definition.service');
+
+const DATE_WORDS = /\b(created[_\s]*time|created|closing[_\s]*date|modified[_\s]*time|modified|converted[_\s]*time|converted|this\s+month|last\s+month|between\s+dates?|date\s+range)\b/i;
+const ANALYTICS_WORDS = /\b(average|avg|sum|total\s+(?:value|revenue)|revenue|comparison|compare|trend|analytics|distribution|growth|rate|top|bottom|ranking|between|join|conver(?:ted|sion|sions)|qualified|became\s+a\s+deal)\b/i;
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function getRequestText(options = {}) {
+  return normalizeText(options.requestText || options.request_text || options.userQuery || options.question || options.prompt || options.message);
+}
+
+function shouldUseCoql(options = {}) {
+  const requestText = getRequestText(options);
+  const criteria = normalizeText(options.criteria || options.filter || options.filters);
+  return Boolean(options.force_coql || DATE_WORDS.test(requestText) || ANALYTICS_WORDS.test(requestText) || DATE_WORDS.test(criteria));
+}
+
+function getQuarterWindow(quarterOffset = 0) {
+  const now = new Date();
+  const currentQuarter = Math.floor(now.getUTCMonth() / 3);
+  const start = new Date(Date.UTC(now.getUTCFullYear(), (currentQuarter + quarterOffset) * 3, 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), (currentQuarter + quarterOffset + 1) * 3, 1));
+  return { start: start.toISOString().replace('.000Z', 'Z'), end: end.toISOString().replace('.000Z', 'Z') };
+}
+
+function getWeekWindow(weekOffset = 0) {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + mondayOffset + (weekOffset * 7)));
+  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + 7));
+  return { start: start.toISOString().replace('.000Z', 'Z'), end: end.toISOString().replace('.000Z', 'Z') };
+}
+
+function getDateField(moduleKey, requestText, conversionFields = []) {
+  const text = normalizeText(requestText).toLowerCase();
+  if (moduleKey === 'leads' && /conver/.test(text)) {
+    return conversionFields.find((field) => /converted.*(date|time)|converted_time/i.test(field)) || 'Converted_Date_Time';
+  }
+  if (moduleKey === 'deals' && /closed|closing/.test(text)) return 'Closing_Date';
+  if (/modified/.test(text)) return 'Modified_Time';
+  if (/created/.test(text)) return 'Created_Time';
+  if (moduleKey === 'deals') return 'Closing_Date';
+  return 'Created_Time';
+}
+
+function getMonthWindow(monthOffset = 0) {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset + 1, 1));
+  return { start: start.toISOString().replace('.000Z', 'Z'), end: end.toISOString().replace('.000Z', 'Z') };
+}
+
+function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
+  const text = normalizeText(requestText).toLowerCase();
+  const conversionFields = options.conversion_fields || [];
+  const clauses = [];
+  if (/closed\s+won/.test(text)) clauses.push("Stage = 'Closed Won'");
+  if (moduleKey === 'leads' && /conver/.test(text) && options.conversion_metric !== 'rate') {
+    if (conversionFields.includes('Converted__s') || conversionFields.includes('Converted')) clauses.push(`${conversionFields.includes('Converted__s') ? 'Converted__s' : 'Converted'} = true`);
+    if (/into\s+deals?|to\s+deals?/.test(text) && conversionFields.includes('Converted_Deal')) clauses.push('Converted_Deal is not null');
+  }
+  if (/this\s+week|this\s+month|last\s+month|this\s+quarter|last\s+quarter/.test(text)) {
+    const window = /week/.test(text)
+      ? getWeekWindow(/last\s+week/.test(text) ? -1 : 0)
+      : /quarter/.test(text)
+      ? getQuarterWindow(/last\s+quarter/.test(text) ? -1 : 0)
+      : getMonthWindow(/last\s+month/.test(text) ? -1 : 0);
+    const field = getDateField(moduleKey, text, conversionFields);
+    clauses.push(`${field} >= '${window.start}'`, `${field} < '${window.end}'`);
+  }
+  if (criteria && !/this\s+month|last\s+month/i.test(text)) {
+    const translated = String(criteria).replace(
+      /\(?([A-Za-z0-9_]+):(equals|greater_equal|greater_than|less_equal|less_than):([^\)]+)\)?/gi,
+      (_match, field, operator, rawValue) => {
+        const value = rawValue.trim().replace(/'/g, "\\'");
+        const operators = { equals: '=', greater_equal: '>=', greater_than: '>', less_equal: '<=', less_than: '<' };
+        return `${field} ${operators[operator.toLowerCase()]} '${value}'`;
+      },
+    );
+    if (translated && translated !== criteria) clauses.push(translated);
+  }
+  return clauses.length ? clauses.map((clause) => `(${clause})`).join(' and ') : null;
+}
+
+function buildQueryPlan(moduleKey, options = {}) {
+  const moduleDefinition = getModuleDefinition(moduleKey);
+  if (!moduleDefinition) throw new Error(`Unsupported CRM module: ${moduleKey}`);
+  const requestText = getRequestText(options);
+  const useCoql = shouldUseCoql(options);
+  const conversionFields = options.conversion_fields || (/conver|qualified|became\s+a\s+deal/i.test(requestText)
+    ? ['Converted_Date_Time', 'Converted__s', 'Converted_Deal']
+    : []);
+  const fields = Array.from(new Set([...(moduleDefinition.defaultFields || []), ...conversionFields, 'id']));
+  const whereClause = buildWhereClause(moduleKey, requestText, options.criteria || options.filter || options.filters, options);
+  const selectExpression = fields.join(', ');
+  const query = `select ${selectExpression} from ${moduleDefinition.endpoint}${whereClause ? ` where ${whereClause}` : ''}`;
+  return { mode: useCoql ? 'coql' : 'search', moduleKey, endpoint: moduleDefinition.endpoint, fields, whereClause, query };
+}
+
+function isInvalidQueryError(error) {
+  const data = error?.response?.data;
+  return error?.response?.status === 400
+    && (data?.code === 'INVALID_QUERY' || data?.code === 'INVALID_DATA' || /field is not available for search|invalid_query/i.test(data?.message || error?.message || ''));
+}
+
+module.exports = {
+  buildQueryPlan,
+  shouldUseCoql,
+  isInvalidQueryError,
+  getRequestText,
+};

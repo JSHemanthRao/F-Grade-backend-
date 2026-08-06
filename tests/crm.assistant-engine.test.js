@@ -2,6 +2,157 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const recordsService = require('../src/crm/services/records.service');
 const assistantEngine = require('../src/crm/services/assistant-engine.service');
+const crmController = require('../src/crm/controllers/crm.controller');
+const { formatResponse } = require('../src/crm/services/assistant/formatter.service');
+const { detectModule, detectModules } = require('../src/crm/services/assistant/module-detector.service');
+const { buildExecutionPlan, detectPagination } = require('../src/crm/services/assistant/planner.service');
+
+test('planner detects natural-language pagination limits and directions', () => {
+  const cases = [
+    ['Show 10 leads', 'leads', 1, 10, 0, 'first'],
+    ['Show first 20 contacts', 'contacts', 1, 20, 0, 'first'],
+    ['Show next 35 leads', 'leads', 2, 35, 35, 'next'],
+    ['Show previous 50 deals', 'deals', 1, 50, 0, 'previous'],
+    ['Show page 2 with 40 records', null, 2, 40, 40, 'page'],
+    ['Show last 15 contacts', 'contacts', 1, 15, 0, 'last'],
+  ];
+
+  cases.forEach(([question, module, page, perPage, offset, direction]) => {
+    const pagination = detectPagination(question, module);
+    assert.deepEqual(
+      { module: pagination.module, page: pagination.page, per_page: pagination.per_page, offset: pagination.offset, direction: pagination.direction },
+      { module, page, per_page: perPage, offset, direction },
+    );
+  });
+});
+
+test('assistant passes planner pagination values to CRM records service', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  let receivedOptions;
+  recordsService.getRecords = async (_module, options) => {
+    receivedOptions = options;
+    return { data: Array.from({ length: 35 }, (_, index) => ({ id: index + 1 })), info: { count: 35 } };
+  };
+
+  try {
+    const plan = buildExecutionPlan('Show next 35 leads');
+    assert.deepEqual(plan.steps[0], {
+      type: 'query', module: 'leads', timeRange: { label: 'all time', range: 'all_time' },
+      action: 'query', page: 2, per_page: 35, offset: 35, direction: 'next', explicit: true,
+    });
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Show next 35 leads' });
+    assert.equal(receivedOptions.retrieval_mode, 'page');
+    assert.equal(receivedOptions.page, 2);
+    assert.equal(receivedOptions.per_page, 35);
+    assert.equal(response.summary, '35 CRM records returned.');
+    assert.equal(response.data.length, 35);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('module detector resolves every supported alias and normalizes punctuation', () => {
+  const cases = [
+    ['How many leads are there?', 'leads'],
+    ['Show first 20 leads', 'leads'],
+    ['Total contacts', 'contacts'],
+    ['Deals this month', 'deals'],
+    ['Closed Won deals', 'deals'],
+    ['Accounts', 'accounts'],
+    ['Meetings', 'events'],
+    ['Appointments', 'events'],
+    ['Customers', 'accounts'],
+    ['Prospects', 'leads'],
+    ['Suppliers', 'vendors'],
+    ['...LeAdS!!!', 'leads'],
+    ['Show me a task', 'tasks'],
+    ['Calls for this week', 'calls'],
+    ['Quote details', 'quotes'],
+    ['Products', 'products'],
+    ['Purchase orders', 'purchase-orders'],
+    ['Sales orders', 'sales-orders'],
+    ['Campaigns', 'campaigns'],
+    ['Purchase Order', 'purchase-orders'],
+    ['Sales Order', 'sales-orders'],
+    ['PO request', 'purchase-orders'],
+  ];
+
+  cases.forEach(([question, expectedModule]) => {
+    assert.equal(detectModule(question), expectedModule, `Expected ${question} to resolve to ${expectedModule}`);
+    assert.deepEqual(detectModules(question), [expectedModule]);
+  });
+});
+
+test('module detector returns multiple modules when the question mentions more than one', () => {
+  assert.deepEqual(detectModules('Show leads and contacts'), ['leads', 'contacts']);
+});
+
+test('assistant controller delegates the request to the assistant engine without pre-detecting modules', async () => {
+  const originalHandleAssistantRequest = assistantEngine.handleAssistantRequest;
+  let receivedPayload;
+
+  assistantEngine.handleAssistantRequest = async (payload) => {
+    receivedPayload = payload;
+    return { success: true, summary: 'delegated' };
+  };
+
+  try {
+    const req = {
+      method: 'POST',
+      body: { question: 'How many leads are there?' },
+      query: {},
+      params: {},
+      headers: {},
+      originalUrl: '/crm/assistant',
+      ip: '127.0.0.1',
+    };
+    const res = {
+      json: (body) => body,
+      status: () => ({ json: () => null }),
+    };
+
+    const response = await crmController.handleAssistantRequest(req, res, () => null);
+
+    assert.deepEqual(receivedPayload, { question: 'How many leads are there?' });
+    assert.equal(response.success, true);
+    assert.equal(response.summary, 'delegated');
+  } finally {
+    assistantEngine.handleAssistantRequest = originalHandleAssistantRequest;
+  }
+});
+
+test('assistant engine executes compare steps with both datasets and formats real CRM output', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  const calls = [];
+
+  recordsService.getRecords = async (moduleKey, options) => {
+    calls.push({ moduleKey, options });
+    if (calls.length === 1) {
+      return { data: [{ Amount: 100 }], info: { count: 1 } };
+    }
+    return { data: [{ Amount: 200 }], info: { count: 1 } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Compare this month deal value with last month' });
+
+    assert.equal(calls.length, 2);
+    assert.equal(response.success, true);
+    assert.equal(response.summary.includes('I analyzed your request'), false);
+    assert.equal(response.summary.includes('No matching CRM records'), false);
+    assert.equal(response.calculations.some((item) => item.type === 'comparison'), true);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('formatter returns a CRM-data-only message when no matching records are available', () => {
+  const response = formatResponse({ question: 'Show leads', steps: [{ type: 'query', module: 'leads' }], modules: ['leads'], intents: ['LIST'] }, [], []);
+
+  assert.equal(response.success, true);
+  assert.equal(response.summary, 'No matching CRM records were found for the requested period.');
+  assert.equal(response.data.length, 0);
+});
 
 test('assistant engine builds a count plan for simple count questions', async () => {
   const originalGetCount = recordsService.getCount;
@@ -28,6 +179,13 @@ test('assistant engine builds a count plan for simple count questions', async ()
   }
 });
 
+test('assistant engine returns a clear module error when the question has no module alias', async () => {
+  const response = await assistantEngine.handleAssistantRequest({ question: 'How much revenue is there?' });
+
+  assert.equal(response.success, false);
+  assert.equal(response.message, 'I could not identify the CRM information needed to answer that question.');
+});
+
 test('assistant engine builds a comparison plan for month-over-month questions', async () => {
   const originalGetRecords = recordsService.getRecords;
 
@@ -47,6 +205,52 @@ test('assistant engine builds a comparison plan for month-over-month questions',
     assert.equal(response.summary.includes('comparison'), true);
     assert.equal(response.calculations.length >= 1, true);
   } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('assistant returns CRM-backed results for the six supported CRM questions', async () => {
+  const originalGetCount = recordsService.getCount;
+  const originalGetRecords = recordsService.getRecords;
+  const leads = Array.from({ length: 20 }, (_, index) => ({ id: `lead-${index + 1}`, First_Name: `Lead ${index + 1}` }));
+  const deals = [
+    { id: 'deal-1', Amount: 1000, Stage: 'Closed Won', Owner: { name: 'Alice' } },
+    { id: 'deal-2', Amount: 500, Stage: 'Closed Won', Owner: { name: 'Bob' } },
+    { id: 'deal-3', Amount: 250, Stage: 'Closed Won', Owner: { name: 'Alice' } },
+  ];
+
+  recordsService.getCount = async (moduleKey) => ({ data: [], info: { count: moduleKey === 'leads' ? 20 : 3 } });
+  recordsService.getRecords = async (moduleKey, options) => {
+    if (moduleKey === 'leads') return { data: leads, info: { count: leads.length } };
+    if (options.request_text?.includes('last month')) return { data: [{ id: 'old-deal', Amount: 400, Owner: { name: 'Bob' } }], info: { count: 1 } };
+    return { data: deals, info: { count: deals.length } };
+  };
+
+  try {
+    const responses = [];
+    for (const question of [
+      'How many leads are there?',
+      'Show first 20 leads',
+      "Compare this month's deals with last month",
+      'Total Closed Won revenue this month',
+      'Average deal value this month',
+      'Top 5 deal owners',
+    ]) {
+      responses.push(await assistantEngine.handleAssistantRequest({ question }));
+    }
+
+    responses.forEach((response) => {
+      assert.equal(response.success, true);
+      assert.equal(/I analyzed your request|request was interpreted|Internal pagination/i.test(JSON.stringify(response)), false);
+    });
+    assert.equal(responses[0].calculations[0].value, 20);
+    assert.equal(responses[1].data.length, 20);
+    assert.equal(responses[2].calculations.some((item) => item.type === 'comparison'), true);
+    assert.equal(responses[3].calculations.some((item) => item.type === 'sum'), true);
+    assert.equal(responses[4].calculations.some((item) => item.type === 'average'), true);
+    assert.equal(responses[5].calculations.some((item) => item.type === 'top_owners'), true);
+  } finally {
+    recordsService.getCount = originalGetCount;
     recordsService.getRecords = originalGetRecords;
   }
 });
