@@ -5,6 +5,7 @@ const { calculateResult } = require('./assistant/calculator.service');
 const { formatResponse } = require('./assistant/formatter.service');
 const { detectModule } = require('./assistant/module-detector.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
+const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
 
 async function getConversionFallback(question, plan) {
   const period = plan.timeRange.label === 'all time' ? 'the requested period' : plan.timeRange.label;
@@ -79,19 +80,19 @@ async function handleAssistantRequest(payload = {}) {
     });
     const needsDealLink = /converted\s+(?:into|to)\s+deals?|became\s+a\s+deal/i.test(question);
     if (!conversionDiscovery.fields.length) {
-      console.info('[CRM Assistant][Fallback Decision]', { reason: 'UNSUPPORTED_METRIC' });
+      logFallbackReason(FALLBACK_REASONS.UNSUPPORTED_METRIC);
       const fallback = await getConversionFallback(question, plan);
       return formatResponse(plan, [], [], { conversionFallback: fallback });
     }
     const needsConversionDate = plan.timeRange.range !== 'all_time';
     const hasConversionDate = conversionDiscovery.fields.some((field) => /converted.*(?:date|time)|conversion.*(?:date|time)/i.test(field));
     if (needsConversionDate && !hasConversionDate) {
-      console.info('[CRM Assistant][Fallback Decision]', { reason: 'INSUFFICIENT_DATA' });
+      logFallbackReason(FALLBACK_REASONS.INSUFFICIENT_DATA);
       const fallback = await getConversionFallback(question, plan);
       return formatResponse(plan, [], [], { conversionFallback: fallback });
     }
     if (needsDealLink && !conversionDiscovery.fields.includes('Converted_Deal')) {
-      console.info('[CRM Assistant][Fallback Decision]', { reason: 'UNSUPPORTED_METRIC' });
+      logFallbackReason(FALLBACK_REASONS.UNSUPPORTED_METRIC);
       const fallback = await getConversionFallback(question, plan);
       return formatResponse(plan, [], [], { conversionFallback: fallback });
     }
@@ -147,13 +148,13 @@ async function handleAssistantRequest(payload = {}) {
       reason: error?.response?.data?.code || error?.code || error?.message,
     });
     if (plan.steps.some((step) => step.type === 'conversion_count')) {
-      console.info('[CRM Assistant][Fallback Decision]', { reason: 'INVALID_QUERY' });
+      logFallbackReason(FALLBACK_REASONS.INVALID_QUERY);
       const fallback = await getConversionFallback(question, plan);
       return formatResponse(plan, [], [], { conversionFallback: fallback });
     }
     return {
       success: false,
-      message: 'I could not retrieve the requested CRM data. Please verify the records or date range and try again.',
+      message: 'I could not retrieve the requested CRM data. Please clarify the records or date range you need and try again.',
       requestedInformation: question,
     };
   }
@@ -161,7 +162,7 @@ async function handleAssistantRequest(payload = {}) {
   const calculations = calculateResult(plan, datasets);
   if (plan.steps.some((step) => step.type === 'conversion_count')
     && calculations.some((calculation) => calculation.type === 'conversion_unavailable')) {
-    console.info('[CRM Assistant][Fallback Decision]', { reason: 'UNSUPPORTED_METRIC' });
+    logFallbackReason(FALLBACK_REASONS.UNSUPPORTED_METRIC);
     const fallback = await getConversionFallback(question, plan);
     return formatResponse(plan, datasets, [], fallback ? { conversionFallback: fallback } : { emptyReason: 'UNSUPPORTED_METRIC' });
   }

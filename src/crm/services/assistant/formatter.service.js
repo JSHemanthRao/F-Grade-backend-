@@ -1,4 +1,9 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
+const {
+  FALLBACK_REASONS,
+  chooseFallback,
+  logFallbackReason,
+} = require('./fallback-engine.service');
 
 function formatResponse(plan, datasets, calculations, options = {}) {
   if (options.conversionFallback) {
@@ -19,29 +24,19 @@ function formatResponse(plan, datasets, calculations, options = {}) {
       followUpQuestions: [],
     };
   }
-  const emptyReason = options.emptyReason || 'EMPTY_RESULT';
-  if (DEBUG_ASSISTANT && (datasets.length === 0 || calculations.length === 0)) {
-    console.info('[CRM Assistant][Fallback Decision]', { reason: emptyReason });
-  }
-  if (emptyReason === 'UNSUPPORTED_METRIC' || emptyReason === 'INSUFFICIENT_DATA') {
-    return {
-      success: true,
-      summary: "I couldn't calculate this metric because the connected CRM doesn't provide the required information.",
-      requestedInformation: plan.question,
-      data: [],
-      calculations: [],
-      insights: [],
-      limitations: [],
-      followUpQuestions: [],
-    };
-  }
+  const emptyReason = options.emptyReason || FALLBACK_REASONS.EMPTY_RESULT;
   const data = datasets.flatMap((dataset) => dataset?.result?.data || dataset?.data || []);
   if (calculations.some((calculation) => calculation.type === 'conversion_unavailable')) {
     return formatResponse(plan, datasets, [], { emptyReason: 'UNSUPPORTED_METRIC' });
   }
   if (data.length === 0 && !calculations.some((calculation) => calculation.type === 'count' && calculation.value > 0)) {
-    const summary = 'No matching CRM records were found for the requested period.';
-    return { success: true, summary, requestedInformation: plan.question, data: [], calculations: [], insights: [], limitations: [], followUpQuestions: [] };
+    logFallbackReason(emptyReason);
+    const fallback = chooseFallback({
+      closestAnswer: options.closestAnswer,
+      clarifyingQuestion: options.clarifyingQuestion,
+      reason: emptyReason,
+    });
+    return { success: true, summary: fallback.answer, requestedInformation: plan.question, data: [], calculations: [], insights: [], limitations: [], followUpQuestions: [] };
   }
   const count = calculations.find((calculation) => calculation.type === 'count');
   const sum = calculations.find((calculation) => calculation.type === 'sum');
