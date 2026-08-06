@@ -1,6 +1,6 @@
 const { getModuleDefinition } = require('./module-definition.service');
 
-const DATE_WORDS = /\b(created[_\s]*time|created|closing[_\s]*date|modified[_\s]*time|modified|converted[_\s]*time|converted|this\s+month|last\s+month|between\s+dates?|date\s+range)\b/i;
+const DATE_WORDS = /\b(created[_\s]*time|created|closing[_\s]*date|modified[_\s]*time|modified|converted[_\s]*time|converted|this\s+month|last\s+month|last\s+\d+\s+months?|last\s+year|between\s+dates?|date\s+range|january|february|march|april|may|june|july|august|september|october|november|december)\b/i;
 const ANALYTICS_WORDS = /\b(average|avg|sum|total\s+(?:value|revenue)|revenue|comparison|compare|trend|analytics|distribution|growth|rate|top|bottom|ranking|between|join|conver(?:ted|sion|sions)|qualified|became\s+a\s+deal)\b/i;
 
 function normalizeText(value) {
@@ -53,6 +53,50 @@ function getMonthWindow(monthOffset = 0) {
   return { start: start.toISOString().replace('.000Z', 'Z'), end: end.toISOString().replace('.000Z', 'Z') };
 }
 
+function formatDateWindow(start, end) {
+  return {
+    start: start.toISOString().replace('.000Z', 'Z'),
+    end: end.toISOString().replace('.000Z', 'Z'),
+  };
+}
+
+function getRequestedDateWindow(requestText) {
+  const text = normalizeText(requestText).toLowerCase();
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const monthNames = 'january february march april may june july august september october november december'.split(' ');
+
+  const rollingMonths = text.match(/last\s+(\d+)\s+months?/i);
+  if (rollingMonths) {
+    const start = new Date(Date.UTC(year, now.getUTCMonth() - Number(rollingMonths[1]), 1));
+    const end = new Date(Date.UTC(year, now.getUTCMonth() + 1, 1));
+    return formatDateWindow(start, end);
+  }
+
+  if (/\blast\s+year\b/i.test(text)) {
+    return formatDateWindow(new Date(Date.UTC(year - 1, 0, 1)), new Date(Date.UTC(year, 0, 1)));
+  }
+
+  const explicit = text.match(/(?:between|from)\s+([a-z]+\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})\s+(?:and|to)\s+([a-z]+\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})/i);
+  if (explicit) {
+    const start = new Date(explicit[1]);
+    const end = new Date(explicit[2]);
+    if (!Number.isNaN(start.valueOf()) && !Number.isNaN(end.valueOf())) {
+      end.setUTCDate(end.getUTCDate() + 1);
+      return formatDateWindow(start, end);
+    }
+  }
+
+  const namedMonth = monthNames.findIndex((name) => new RegExp(`\\b${name}\\b`, 'i').test(text));
+  if (namedMonth >= 0) {
+    const explicitYear = text.match(new RegExp(`\\b${monthNames[namedMonth]}\\s+(\\d{4})\\b`, 'i'));
+    const targetYear = explicitYear ? Number(explicitYear[1]) : year;
+    return formatDateWindow(new Date(Date.UTC(targetYear, namedMonth, 1)), new Date(Date.UTC(targetYear, namedMonth + 1, 1)));
+  }
+
+  return null;
+}
+
 function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
   const text = normalizeText(requestText).toLowerCase();
   const conversionFields = options.conversion_fields || [];
@@ -62,7 +106,11 @@ function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
     if (conversionFields.includes('Converted__s') || conversionFields.includes('Converted')) clauses.push(`${conversionFields.includes('Converted__s') ? 'Converted__s' : 'Converted'} = true`);
     if (/into\s+deals?|to\s+deals?/.test(text) && conversionFields.includes('Converted_Deal')) clauses.push('Converted_Deal is not null');
   }
-  if (/this\s+week|this\s+month|last\s+month|this\s+quarter|last\s+quarter/.test(text)) {
+  const requestedDateWindow = getRequestedDateWindow(text);
+  if (requestedDateWindow) {
+    const field = getDateField(moduleKey, text, conversionFields);
+    clauses.push(`${field} >= '${requestedDateWindow.start}'`, `${field} < '${requestedDateWindow.end}'`);
+  } else if (/this\s+week|this\s+month|last\s+month|this\s+quarter|last\s+quarter/.test(text)) {
     const window = /week/.test(text)
       ? getWeekWindow(/last\s+week/.test(text) ? -1 : 0)
       : /quarter/.test(text)
@@ -71,7 +119,7 @@ function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
     const field = getDateField(moduleKey, text, conversionFields);
     clauses.push(`${field} >= '${window.start}'`, `${field} < '${window.end}'`);
   }
-  if (criteria && !/this\s+month|last\s+month/i.test(text)) {
+  if (criteria && !requestedDateWindow && !/this\s+month|last\s+month/i.test(text)) {
     const translated = String(criteria).replace(
       /\(?([A-Za-z0-9_]+):(equals|greater_equal|greater_than|less_equal|less_than):([^\)]+)\)?/gi,
       (_match, field, operator, rawValue) => {

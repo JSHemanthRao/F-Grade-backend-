@@ -55,6 +55,10 @@ const FULL_RETRIEVAL_PATTERNS = [
   /\bmatching\b/,
   /\bthis\s+month\b/,
   /\blast\s+month\b/,
+  /\blast\s+\d+\s+months?\b/,
+  /\blast\s+year\b/,
+  /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/,
+  /\b(?:between|from)\b.*\b(?:and|to)\b/,
 ];
 
 const COUNT_INTENT_PATTERNS = [
@@ -489,6 +493,7 @@ async function fetchAllPages({
   onPageFetched,
 }) {
   const allRecords = [];
+  const seenRecordIds = new Set();
   let page = 1;
   let pageToken = null;
   let lastPayload = null;
@@ -545,7 +550,13 @@ async function fetchAllPages({
       break;
     }
 
-    allRecords.push(...pageRecords);
+    pageRecords.forEach((record) => {
+      const recordId = record?.id ?? record?.ID;
+      if (recordId === undefined || recordId === null || !seenRecordIds.has(String(recordId))) {
+        if (recordId !== undefined && recordId !== null) seenRecordIds.add(String(recordId));
+        allRecords.push(record);
+      }
+    });
 
     if (info.more_records !== true) {
       logPaginationStopDebug({

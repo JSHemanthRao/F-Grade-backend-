@@ -154,7 +154,7 @@ async function handleAssistantRequest(payload = {}) {
     }
     return {
       success: false,
-      message: 'I could not retrieve the requested CRM data. Please clarify the records or date range you need and try again.',
+      message: 'The CRM could not provide the requested information at this time.',
       requestedInformation: question,
     };
   }

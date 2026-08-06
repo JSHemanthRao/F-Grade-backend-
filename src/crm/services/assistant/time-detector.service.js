@@ -15,6 +15,12 @@ function detectTimeRange(question) {
   if (/this year/.test(normalizedQuestion)) detectedKeywords.push('this year');
   if (/last year/.test(normalizedQuestion)) detectedKeywords.push('last year');
   if (/last 30 days/.test(normalizedQuestion)) detectedKeywords.push('last 30 days');
+  const rollingMonths = normalizedQuestion.match(/last\s+(\d+)\s+months?/);
+  if (rollingMonths) detectedKeywords.push(`last ${rollingMonths[1]} months`);
+  if (/last year/.test(normalizedQuestion)) detectedKeywords.push('last year');
+  const namedMonth = normalizedQuestion.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/);
+  if (namedMonth) detectedKeywords.push(namedMonth[1]);
+  if (/(?:between|from)\s+.+\s+(?:and|to)\s+.+/.test(normalizedQuestion)) detectedKeywords.push('custom date range');
 
   const result = detectedKeywords.length > 0
     ? { label: detectedKeywords[0], range: detectedKeywords[0].replace(/\s+/g, '_') }

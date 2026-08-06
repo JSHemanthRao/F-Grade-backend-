@@ -9,7 +9,7 @@ const SAFE_MESSAGES = Object.freeze({
   [FALLBACK_REASONS.EMPTY_RESULT]: 'No matching CRM records were found for the requested period.',
   [FALLBACK_REASONS.UNSUPPORTED_METRIC]: "I couldn't calculate this metric because the connected CRM doesn't provide the required information.",
   [FALLBACK_REASONS.INSUFFICIENT_DATA]: "I couldn't calculate this metric because the connected CRM doesn't provide the required information.",
-  [FALLBACK_REASONS.INVALID_QUERY]: 'I could not retrieve the requested CRM data. Please clarify the records or date range you need and try again.',
+  [FALLBACK_REASONS.INVALID_QUERY]: 'The CRM could not provide the requested information at this time.',
 });
 
 function logFallbackReason(reason, details = {}) {

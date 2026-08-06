@@ -59,10 +59,7 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     calculations,
     insights: [],
     limitations: [],
-    followUpQuestions: [
-      `Would you like a breakdown by ${plan.modules[0]} owner?`,
-      'Would you like this view extended to the previous period?',
-    ],
+    followUpQuestions: [],
   };
 
   if (DEBUG_ASSISTANT) {
