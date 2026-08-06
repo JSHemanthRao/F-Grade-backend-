@@ -36,6 +36,12 @@ function calculateResult(plan, datasets) {
     if (plan.intents.includes('AGGREGATION') && /average|avg/i.test(plan.question)) {
       calculations.push({ label: 'Average', value: values.length ? sum / values.length : 0, type: 'average' });
     }
+    if (/median/i.test(plan.question)) {
+      const sorted = [...values].sort((a, b) => a - b);
+      calculations.push({ label: 'Median', value: sorted.length ? (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.ceil((sorted.length - 1) / 2)]) / 2 : 0, type: 'median' });
+    }
+    if (/maximum|highest|max/i.test(plan.question)) calculations.push({ label: 'Maximum', value: values.length ? Math.max(...values) : 0, type: 'maximum' });
+    if (/minimum|lowest|min/i.test(plan.question)) calculations.push({ label: 'Minimum', value: values.length ? Math.min(...values) : 0, type: 'minimum' });
   }
 
   if (plan.steps.some((step) => step.type === 'compare')) {
@@ -110,7 +116,7 @@ function calculateResult(plan, datasets) {
     }
   }
 
-  if (plan.intents.includes('ANALYTICS')) {
+  if (plan.intents.includes('ANALYTICS') || plan.report) {
     const owners = {};
     datasets.flatMap(getRecords).forEach((record) => {
       const owner = record.Owner?.name || record.Owner?.Name || record.Owner_Name || record.owner || 'Unassigned';
@@ -118,6 +124,16 @@ function calculateResult(plan, datasets) {
     });
     calculations.push({ label: 'Top owners', type: 'top_owners', value: Object.entries(owners)
       .sort((a, b) => b[1] - a[1]).slice(0, 5).map(([owner, count]) => ({ owner, count })) });
+    const stages = {};
+    datasets.flatMap(getRecords).forEach((record) => {
+      const stage = record.Stage || record.Status;
+      if (stage) stages[stage] = (stages[stage] || 0) + 1;
+    });
+    if (Object.keys(stages).length > 0) calculations.push({ label: 'Stage distribution', type: 'stage_distribution', value: stages });
+    if (plan.report || /pipeline/i.test(plan.question)) {
+      const pipeline = datasets.flatMap(getRecords).filter((record) => !/closed\s+(won|lost)/i.test(record.Stage || '')).reduce((sum, record) => sum + getAmount(record), 0);
+      calculations.push({ label: 'Pipeline', type: 'pipeline', value: pipeline });
+    }
   }
 
   if (DEBUG_ASSISTANT) console.info('[CRM Assistant][Calculation] ↓', { calculations });

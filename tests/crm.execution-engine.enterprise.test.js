@@ -155,3 +155,38 @@ test('business insights report only supported highest, lowest, and growth facts'
   assert.equal(insights.some((insight) => insight.type === 'highest_value' && insight.message.includes('250')), true);
   assert.equal(insights.some((insight) => insight.type === 'lowest_value' && insight.message.includes('100')), true);
 });
+
+test('performance report planning coordinates required CRM datasets', () => {
+  const plan = buildExecutionPlan('Complete CRM Performance Report');
+  assert.equal(plan.report, true);
+  assert.deepEqual(plan.modules, ['leads', 'contacts', 'accounts', 'deals']);
+  assert.deepEqual(plan.steps.map((step) => step.module), ['leads', 'contacts', 'accounts', 'deals']);
+  assert.deepEqual(plan.steps.at(-1).reportTasks, ['pipeline', 'closed_won', 'closed_lost', 'stage_distribution', 'top_customers', 'top_reps']);
+});
+
+test('performance report retrieves modules, merges data, and calculates business analytics', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  const calls = [];
+  recordsService.getRecords = async (moduleKey) => {
+    calls.push(moduleKey);
+    const data = moduleKey === 'deals'
+      ? [
+        { id: 'd1', Amount: 100, Stage: 'Closed Won', Owner: { name: 'Asha' } },
+        { id: 'd2', Amount: 200, Stage: 'Negotiation', Owner: { name: 'Asha' } },
+        { id: 'd3', Amount: 300, Stage: 'Closed Lost', Owner: { name: 'Ravi' } },
+      ]
+      : [{ id: `${moduleKey}-1`, Owner: { name: 'Asha' } }];
+    return { data, info: { count: data.length, more_records: false } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Complete CRM Performance Report' });
+    assert.deepEqual(calls, ['leads', 'contacts', 'accounts', 'deals']);
+    assert.equal(response.success, true);
+    assert.equal(response.calculations.some((item) => item.type === 'stage_distribution'), true);
+    assert.equal(response.calculations.some((item) => item.type === 'pipeline' && item.value === 200), true);
+    assert.equal(response.calculations.some((item) => item.type === 'top_owners'), true);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});

@@ -40,7 +40,10 @@ function buildExecutionPlan(question, context = {}) {
   const normalizedQuestion = normalizeQuestion(question);
   const tokens = tokenizeQuestion(question);
   const detectedModules = detectModules(question);
-  const modules = detectedModules.length > 0
+  const isPerformanceReport = /complete\s+crm\s+performance\s+report|crm\s+performance\s+report|performance\s+report/i.test(question);
+  const modules = isPerformanceReport
+    ? ['leads', 'contacts', 'accounts', 'deals']
+    : detectedModules.length > 0
     ? detectedModules
     : (Array.isArray(context.modules) ? context.modules.filter(Boolean) : []);
   const timeRange = detectTimeRange(question);
@@ -55,6 +58,7 @@ function buildExecutionPlan(question, context = {}) {
     timeRange,
     pagination,
     steps: [],
+    report: isPerformanceReport,
   };
 
   if (DEBUG_ASSISTANT) {
@@ -68,6 +72,12 @@ function buildExecutionPlan(question, context = {}) {
       pagination,
       executionPlan: plan,
     });
+  }
+
+  if (isPerformanceReport) {
+    modules.filter((module) => module !== 'deals').forEach((module) => plan.steps.push({ type: 'query', module, timeRange }));
+    plan.steps.push({ type: 'analytics', module: 'deals', timeRange, reportTasks: ['pipeline', 'closed_won', 'closed_lost', 'stage_distribution', 'top_customers', 'top_reps'] });
+    return plan;
   }
 
   if (intents.includes('CONVERSION')) {

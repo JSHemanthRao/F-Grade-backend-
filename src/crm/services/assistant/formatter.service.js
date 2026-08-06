@@ -73,8 +73,12 @@ function formatResponse(plan, datasets, calculations, options = {}) {
   const monthlyPerformance = calculations.find((calculation) => calculation.type === 'monthly_performance');
   const conversionCount = calculations.find((calculation) => calculation.type === 'conversion_count');
   const conversionRate = calculations.find((calculation) => calculation.type === 'conversion_rate');
+  const stageDistribution = calculations.find((calculation) => calculation.type === 'stage_distribution');
+  const pipeline = calculations.find((calculation) => calculation.type === 'pipeline');
   const summary = conversionRate ? `CRM lead conversion rate: ${(conversionRate.value * 100).toFixed(2)}%.`
     : conversionCount ? `${conversionCount.value} converted CRM leads found.`
+    : pipeline ? `Pipeline value: ${pipeline.value}.`
+    : stageDistribution ? `Stage distribution: ${Object.entries(stageDistribution.value).map(([stage, value]) => `${stage} ${value}`).join(', ')}.`
     : monthlyPerformance ? `Monthly CRM performance: ${Object.entries(monthlyPerformance.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}${monthlyPerformance.value.growth === null ? '.' : `; latest month-over-month growth ${(monthlyPerformance.value.growth * 100).toFixed(2)}%.`}`
     : multiModuleComparison ? `CRM comparison completed for ${Object.entries(multiModuleComparison.value).map(([module, values]) => `${module}: this month ${values['this month']}, last month ${values['last month']}, difference ${values.difference}`).join('; ')}.`
     : comparison ? `CRM comparison: this month ${comparison.value['this month']}, last month ${comparison.value['last month']}, difference ${comparison.value.difference}.`
