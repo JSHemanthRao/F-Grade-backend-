@@ -16,6 +16,7 @@ function formatResponse(plan, datasets, calculations, options = {}) {
       summary: fallbackSummary,
       requestedInformation: plan.question,
       data: [],
+      tables: [],
       calculations: leadCount !== undefined && dealCount !== undefined
         ? [{ label: 'New leads', type: 'fallback_leads_created', value: leadCount }, { label: 'New deals', type: 'fallback_deals_created', value: dealCount }]
         : [],
@@ -25,41 +26,76 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     };
   }
   const emptyReason = options.emptyReason || FALLBACK_REASONS.EMPTY_RESULT;
-  const data = datasets.flatMap((dataset) => dataset?.result?.data || dataset?.data || []);
+  const seenIds = new Set();
+  const data = datasets.flatMap((dataset) => dataset?.result?.data || dataset?.data || [])
+    .filter((record) => {
+      const id = record?.id ?? record?.ID;
+      if (id === undefined || id === null) return true;
+      const key = String(id);
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
   if (calculations.some((calculation) => calculation.type === 'conversion_unavailable')) {
     return formatResponse(plan, datasets, [], { emptyReason: 'UNSUPPORTED_METRIC' });
   }
-  if (data.length === 0 && !calculations.some((calculation) => calculation.type === 'count' && calculation.value > 0)) {
+  if (options.limitation) {
+    return {
+      success: true,
+      summary: options.closestAnswer || 'The CRM could not complete the requested analysis.',
+      requestedInformation: plan.question,
+      data,
+      tables: [],
+      calculations,
+      insights: options.insights || [],
+      limitations: [options.limitation],
+      followUpQuestions: [],
+    };
+  }
+  if (data.length === 0 && !calculations.some((calculation) => (
+    (calculation.type === 'count' && calculation.value > 0)
+    || (calculation.type === 'counts' && Object.values(calculation.value).some((value) => value > 0))
+  ))) {
     logFallbackReason(emptyReason);
     const fallback = chooseFallback({
       closestAnswer: options.closestAnswer,
       clarifyingQuestion: options.clarifyingQuestion,
       reason: emptyReason,
     });
-    return { success: true, summary: fallback.answer, requestedInformation: plan.question, data: [], calculations: [], insights: [], limitations: [], followUpQuestions: [] };
+    return { success: true, summary: fallback.answer, requestedInformation: plan.question, data: [], tables: [], calculations: [], insights: [], limitations: [], followUpQuestions: [] };
   }
   const count = calculations.find((calculation) => calculation.type === 'count');
+  const counts = calculations.find((calculation) => calculation.type === 'counts');
   const sum = calculations.find((calculation) => calculation.type === 'sum');
   const average = calculations.find((calculation) => calculation.type === 'average');
   const comparison = calculations.find((calculation) => calculation.type === 'comparison');
+  const multiModuleComparison = calculations.find((calculation) => calculation.type === 'multi_module_comparison');
+  const monthlyPerformance = calculations.find((calculation) => calculation.type === 'monthly_performance');
   const conversionCount = calculations.find((calculation) => calculation.type === 'conversion_count');
   const conversionRate = calculations.find((calculation) => calculation.type === 'conversion_rate');
   const summary = conversionRate ? `CRM lead conversion rate: ${(conversionRate.value * 100).toFixed(2)}%.`
     : conversionCount ? `${conversionCount.value} converted CRM leads found.`
+    : monthlyPerformance ? `Monthly CRM performance: ${Object.entries(monthlyPerformance.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}${monthlyPerformance.value.growth === null ? '.' : `; latest month-over-month growth ${(monthlyPerformance.value.growth * 100).toFixed(2)}%.`}`
+    : multiModuleComparison ? `CRM comparison completed for ${Object.entries(multiModuleComparison.value).map(([module, values]) => `${module}: this month ${values['this month']}, last month ${values['last month']}, difference ${values.difference}`).join('; ')}.`
     : comparison ? `CRM comparison: this month ${comparison.value['this month']}, last month ${comparison.value['last month']}, difference ${comparison.value.difference}.`
     : average ? `Average CRM deal value: ${average.value}.`
       : sum ? `Total CRM value: ${sum.value}.`
-        : count ? `${count.value} matching records found in CRM.`
+    : counts ? `CRM counts: ${Object.entries(counts.value).map(([module, value]) => `${module} ${value}`).join(', ')}.`
+      : count ? `${count.value} matching records found in CRM.`
           : `${data.length} CRM records returned.`;
   const response = {
     success: true,
     summary,
     requestedInformation: plan.question,
     data,
+    tables: [],
     calculations,
-    insights: [],
+    insights: options.insights || [],
     limitations: [],
-    followUpQuestions: [],
+    followUpQuestions: [
+      'Which owner, segment, or region should be included in the next analysis?',
+      'What period should be used for the next business comparison?',
+    ],
   };
 
   if (DEBUG_ASSISTANT) {

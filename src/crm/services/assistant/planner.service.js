@@ -35,11 +35,14 @@ function detectPagination(question, module) {
   };
 }
 
-function buildExecutionPlan(question) {
+function buildExecutionPlan(question, context = {}) {
   const intents = detectIntents(question);
   const normalizedQuestion = normalizeQuestion(question);
   const tokens = tokenizeQuestion(question);
-  const modules = detectModules(question);
+  const detectedModules = detectModules(question);
+  const modules = detectedModules.length > 0
+    ? detectedModules
+    : (Array.isArray(context.modules) ? context.modules.filter(Boolean) : []);
   const timeRange = detectTimeRange(question);
   const pagination = detectPagination(question, modules[0]);
 
@@ -78,12 +81,12 @@ function buildExecutionPlan(question) {
       timeRange: timeRange.range,
       metric: /conversion\s+rate|rate/i.test(question) ? 'rate' : 'count',
     });
-  } else if (intents.includes('COUNT')) {
-    plan.steps.push({ type: 'count', module: modules[0] });
+  } else if (intents.includes('COUNT') && !(intents.includes('AGGREGATION') && /sum|average|avg|value|revenue|amount|median|percentage|growth|rate/i.test(question))) {
+    modules.forEach((module) => plan.steps.push({ type: 'count', module }));
   }
 
   if (!intents.includes('CONVERSION') && intents.includes('COMPARE')) {
-    plan.steps.push({ type: 'compare', module: modules[0], timeRange });
+    plan.steps.push({ type: 'compare', module: modules[0], modules, timeRange });
   }
 
   if (!intents.includes('CONVERSION') && !intents.includes('COMPARE') && intents.includes('AGGREGATION') && /sum|average|avg|value|revenue|amount|median|percentage|growth|rate/i.test(question)) {

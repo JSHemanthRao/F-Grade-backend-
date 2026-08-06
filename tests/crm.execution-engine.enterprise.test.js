@@ -5,6 +5,9 @@ const { fetchAllPages } = require('../src/crm/services/pagination.service');
 const { formatResponse } = require('../src/crm/services/assistant/formatter.service');
 const recordsService = require('../src/crm/services/records.service');
 const assistantEngine = require('../src/crm/services/assistant-engine.service');
+const { buildExecutionPlan } = require('../src/crm/services/assistant/planner.service');
+const { optimizeExecutionPlan } = require('../src/crm/services/assistant/query-optimizer.service');
+const { generateInsights } = require('../src/crm/services/assistant/insight.service');
 
 test('date-oriented CRM requests become bounded business date filters', () => {
   const cases = [
@@ -48,8 +51,27 @@ test('business responses do not ask permission or expose retrieval mechanics', (
   );
 
   const output = JSON.stringify(response);
-  assert.deepEqual(response.followUpQuestions, []);
+  assert.equal(response.followUpQuestions.length, 2);
   assert.doesNotMatch(output, /Would you like|Shall I|Do you want me|page|per_page|pagination/i);
+});
+
+test('multi-module comparisons retrieve each module independently before calculating', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  const calls = [];
+  recordsService.getRecords = async (moduleKey, options) => {
+    calls.push({ moduleKey, options });
+    return { data: [{ id: `${moduleKey}-${calls.length}`, Amount: moduleKey === 'deals' ? 100 : 0 }], info: { count: 1 } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Compare leads and deals created this month' });
+    assert.deepEqual(calls.map((call) => call.moduleKey), ['leads', 'deals']);
+    assert.equal(response.calculations.some((item) => item.type === 'multi_module_comparison'), true);
+    assert.match(response.summary, /leads/);
+    assert.match(response.summary, /deals/);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
 });
 
 test('verification wording triggers a CRM execution immediately', async () => {
@@ -70,4 +92,66 @@ test('verification wording triggers a CRM execution immediately', async () => {
   } finally {
     recordsService.getRecords = originalGetRecords;
   }
+});
+
+test('query optimization selects only fields needed by the requested calculation', () => {
+  const optimized = optimizeExecutionPlan(buildExecutionPlan('Total Closed Won deal revenue this month'));
+  const fields = optimized.steps.find((step) => step.type === 'aggregate').requiredFieldsByModule.deals;
+  assert.ok(fields.includes('Amount'));
+  assert.ok(fields.includes('Stage'));
+  assert.ok(fields.includes('Closing_Date'));
+  assert.equal(fields.includes('Email'), false);
+});
+
+test('failed CRM tasks retry once with an alternate retrieval strategy', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  let calls = 0;
+  recordsService.getRecords = async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('temporary CRM failure');
+    return { data: [{ id: 'deal-1', Amount: 125 }], info: { count: 1, more_records: false } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Show deals' });
+    assert.equal(calls, 2);
+    assert.equal(response.success, true);
+    assert.equal(response.data.length, 1);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('context datasets are reused for a follow-up without another CRM call', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  let calls = 0;
+  recordsService.getRecords = async () => {
+    calls += 1;
+    return { data: [], info: { count: 0 } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({
+      question: 'Compare with last month',
+      context: {
+        modules: ['deals'],
+        lastQuestion: 'Show deals',
+        datasets: [{ module: 'deals', period: null, requestFingerprint: 'Show deals', result: { data: [{ id: 'deal-1' }], info: { count: 1, more_records: false } } }],
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(response.data.length, 1);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('business insights report only supported highest, lowest, and growth facts', () => {
+  const insights = generateInsights(
+    { question: 'Compare deal values', steps: [] },
+    [{ result: { data: [{ id: '1', Amount: 100 }, { id: '2', Amount: 250 }] } }],
+    [],
+  );
+  assert.equal(insights.some((insight) => insight.type === 'highest_value' && insight.message.includes('250')), true);
+  assert.equal(insights.some((insight) => insight.type === 'lowest_value' && insight.message.includes('100')), true);
 });

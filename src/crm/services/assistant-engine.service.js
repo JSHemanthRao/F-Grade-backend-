@@ -6,6 +6,9 @@ const { formatResponse } = require('./assistant/formatter.service');
 const { detectModule } = require('./assistant/module-detector.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
 const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
+const { optimizeExecutionPlan } = require('./assistant/query-optimizer.service');
+const { validateExecution } = require('./assistant/validation.service');
+const { generateInsights } = require('./assistant/insight.service');
 
 async function getConversionFallback(question, plan) {
   const period = plan.timeRange.label === 'all time' ? 'the requested period' : plan.timeRange.label;
@@ -41,8 +44,11 @@ async function handleAssistantRequest(payload = {}) {
     };
   }
 
-  const plan = buildExecutionPlan(question);
+  const context = payload?.context || payload?.conversationContext || {};
+  const plan = optimizeExecutionPlan(buildExecutionPlan(question, context));
   const datasets = [];
+  const requestCache = new Map();
+  const contextDatasets = Array.isArray(context.datasets) ? context.datasets : [];
 
   if (DEBUG_ASSISTANT) {
     console.info('[CRM Assistant][Planner Steps] ↓', plan.steps);
@@ -100,11 +106,17 @@ async function handleAssistantRequest(payload = {}) {
 
   try {
     for (const step of plan.steps) {
-    const moduleKey = step.module || moduleCandidates[0];
-    const periods = step.type === 'compare' || (step.type === 'conversion_count' && plan.intents.includes('COMPARE'))
+    const stepModules = Array.isArray(step.modules) && step.modules.length > 0
+      ? step.modules
+      : [step.module || moduleCandidates[0]];
+    const explicitPeriodComparison = /\bthis month\b[\s\S]*\blast month\b|\blast month\b[\s\S]*\bthis month\b/i.test(question)
+      || (contextDatasets.length > 0 && /\blast month\b/i.test(question) && step.type === 'compare');
+    const periods = ((step.type === 'compare' && explicitPeriodComparison)
+      || (step.type === 'conversion_count' && plan.intents.includes('COMPARE')))
       ? ['this month', 'last month']
       : [null];
 
+    for (const moduleKey of stepModules) {
     for (const period of periods) {
       const stepQuestion = period
         ? ` ${question.replace(/\b(this month|last month)\b/gi, '')} ${period}`
@@ -118,16 +130,43 @@ async function handleAssistantRequest(payload = {}) {
           offset: step.offset,
         } : {}),
         ...(conversionDiscovery ? { conversion_fields: conversionDiscovery.fields, conversion_metric: step.metric } : {}),
+        ...(step.requiredFieldsByModule?.[moduleKey]?.length ? { fields: step.requiredFieldsByModule[moduleKey] } : {}),
         retrieval_mode: step.type === 'count' ? 'count' : (['aggregate', 'analytics', 'compare', 'conversion_count'].includes(step.type) ? 'all' : (step.type === 'query' && step.explicit ? 'page' : 'auto')),
       };
+
+      const cacheKey = JSON.stringify({ moduleKey, period, type: step.type, options: requestOptions });
+      const contextual = contextDatasets.find((dataset) => dataset.cacheKey === cacheKey
+        || (dataset.module === moduleKey
+          && (dataset.period === period || (period === 'this month' && dataset.period == null))
+          && dataset.requestFingerprint === context.lastQuestion));
+      const cached = requestCache.get(cacheKey) || contextual?.result;
+      if (cached) {
+        datasets.push({ step, period, module: moduleKey, result: cached, reused: true });
+        continue;
+      }
 
       if (DEBUG_ASSISTANT) {
         console.info('[CRM Assistant][CRM Call] ↓', { step, module: moduleKey, period, options: requestOptions });
       }
 
-      const result = step.type === 'count'
-        ? await recordsService.getCount(moduleKey, requestOptions)
-        : await recordsService.getRecords(moduleKey, requestOptions);
+      const execute = async (options) => (step.type === 'count'
+        ? recordsService.getCount(moduleKey, options)
+        : recordsService.getRecords(moduleKey, options));
+      let result;
+      try {
+        result = await execute(requestOptions);
+      } catch (firstError) {
+        console.warn('[CRM Assistant] Retrying CRM task', { module: moduleKey, task: step.type });
+        result = await execute({
+          ...requestOptions,
+          force_coql: true,
+          retrieval_mode: step.explicit ? requestOptions.retrieval_mode : (step.type === 'count' ? 'count' : 'all'),
+        });
+      }
+      if (result?.info?.more_records === true && !step.explicit) {
+        result = await execute({ ...requestOptions, retrieval_mode: 'all', force_coql: true });
+      }
+      requestCache.set(cacheKey, result);
 
       datasets.push({ step, period, module: moduleKey, result });
 
@@ -140,6 +179,7 @@ async function handleAssistantRequest(payload = {}) {
           records: result?.data?.length ?? 0,
         });
       }
+    }
     }
     }
   } catch (error) {
@@ -159,14 +199,35 @@ async function handleAssistantRequest(payload = {}) {
     };
   }
 
-  const calculations = calculateResult(plan, datasets);
+  let calculations = calculateResult(plan, datasets);
+  let validation = validateExecution({ plan, question, datasets, calculations });
+  if (!validation.valid) {
+    console.warn('[CRM Assistant] Execution validation failed', { issues: validation.issues });
+    const incomplete = datasets.filter((dataset) => dataset?.result?.info?.more_records === true && !dataset.step?.explicit);
+    for (const dataset of incomplete) {
+      const retryOptions = { question, fields: dataset.step.requiredFieldsByModule?.[dataset.module], retrieval_mode: 'all', force_coql: true };
+      const retryResult = dataset.step.type === 'count'
+        ? await recordsService.getCount(dataset.module, retryOptions)
+        : await recordsService.getRecords(dataset.module, retryOptions);
+      dataset.result = retryResult;
+    }
+    calculations = calculateResult(plan, datasets);
+    validation = validateExecution({ plan, question, datasets, calculations });
+  }
+  if (!validation.valid) {
+    return formatResponse(plan, datasets, [], {
+      emptyReason: FALLBACK_REASONS.INVALID_QUERY,
+      closestAnswer: 'The CRM returned partial information, so no unsupported conclusion was generated.',
+      limitation: 'The CRM could not complete every required retrieval, so the result is not presented as a complete business answer.',
+    });
+  }
   if (plan.steps.some((step) => step.type === 'conversion_count')
     && calculations.some((calculation) => calculation.type === 'conversion_unavailable')) {
     logFallbackReason(FALLBACK_REASONS.UNSUPPORTED_METRIC);
     const fallback = await getConversionFallback(question, plan);
     return formatResponse(plan, datasets, [], fallback ? { conversionFallback: fallback } : { emptyReason: 'UNSUPPORTED_METRIC' });
   }
-  return formatResponse(plan, datasets, calculations);
+  return formatResponse(plan, datasets, calculations, { insights: generateInsights(plan, datasets, calculations) });
 }
 
 module.exports = {
