@@ -1,6 +1,6 @@
 const { getModuleDefinition } = require('./module-definition.service');
 
-const DATE_WORDS = /\b(created[_\s]*time|created|closing[_\s]*date|modified[_\s]*time|modified|converted[_\s]*time|converted|this\s+month|last\s+month|last\s+\d+\s+months?|last\s+year|between\s+dates?|date\s+range|january|february|march|april|may|june|july|august|september|october|november|december)\b/i;
+const DATE_WORDS = /\b(created[_\s]*time|created|closing[_\s]*date|modified[_\s]*time|modified|converted[_\s]*time|converted|this\s+month|current\s+month|month[-\s]+to[-\s]+date|last\s+month|previous\s+month|last\s+\d+\s+months?|last\s+year|between\s+dates?|date\s+range|january|february|march|april|may|june|july|august|september|october|november|december)\b/i;
 const ANALYTICS_WORDS = /\b(average|avg|sum|total\s+(?:value|revenue)|revenue|comparison|compare|trend|analytics|distribution|growth|rate|top|bottom|ranking|between|join|conver(?:ted|sion|sions)|qualified|became\s+a\s+deal)\b/i;
 
 function normalizeText(value) {
@@ -69,7 +69,9 @@ function getRequestedDateWindow(requestText) {
   const rollingMonths = text.match(/last\s+(\d+)\s+months?/i);
   if (rollingMonths) {
     const start = new Date(Date.UTC(year, now.getUTCMonth() - Number(rollingMonths[1]), 1));
-    const end = new Date(Date.UTC(year, now.getUTCMonth() + 1, 1));
+    // "Last N months" means completed months; the current month is not part
+    // of this historical-only range.
+    const end = new Date(Date.UTC(year, now.getUTCMonth(), 1));
     return formatDateWindow(start, end);
   }
 
@@ -110,16 +112,16 @@ function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
   if (requestedDateWindow) {
     const field = getDateField(moduleKey, text, conversionFields);
     clauses.push(`${field} >= '${requestedDateWindow.start}'`, `${field} < '${requestedDateWindow.end}'`);
-  } else if (/this\s+week|this\s+month|last\s+month|this\s+quarter|last\s+quarter/.test(text)) {
+  } else if (/this\s+week|this\s+month|current\s+month|month[-\s]+to[-\s]+date|last\s+month|previous\s+month|this\s+quarter|last\s+quarter/.test(text)) {
     const window = /week/.test(text)
       ? getWeekWindow(/last\s+week/.test(text) ? -1 : 0)
       : /quarter/.test(text)
       ? getQuarterWindow(/last\s+quarter/.test(text) ? -1 : 0)
-      : getMonthWindow(/last\s+month/.test(text) ? -1 : 0);
+      : getMonthWindow(/last\s+month|previous\s+month/.test(text) ? -1 : 0);
     const field = getDateField(moduleKey, text, conversionFields);
     clauses.push(`${field} >= '${window.start}'`, `${field} < '${window.end}'`);
   }
-  if (criteria && !requestedDateWindow && !/this\s+month|last\s+month/i.test(text)) {
+  if (criteria && !requestedDateWindow && !/this\s+month|current\s+month|month[-\s]+to[-\s]+date|last\s+month|previous\s+month/i.test(text)) {
     const translated = String(criteria).replace(
       /\(?([A-Za-z0-9_]+):(equals|greater_equal|greater_than|less_equal|less_than):([^\)]+)\)?/gi,
       (_match, field, operator, rawValue) => {

@@ -69,11 +69,29 @@ function calculateResult(plan, datasets) {
         const month = parsed.toISOString().slice(0, 7);
         monthlyTotals[month] = (monthlyTotals[month] || 0) + getAmount(record);
       });
+      const requestedMonthCount = plan.timeRange?.monthCount;
+      if (requestedMonthCount) {
+        const now = new Date();
+        const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - requestedMonthCount, 1));
+        for (let index = 0; index < requestedMonthCount; index += 1) {
+          const month = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1)).toISOString().slice(0, 7);
+          if (!Object.prototype.hasOwnProperty.call(monthlyTotals, month)) monthlyTotals[month] = 0;
+        }
+      }
       const months = Object.keys(monthlyTotals).sort();
       const growth = months.length > 1 && monthlyTotals[months[months.length - 2]] !== 0
         ? (monthlyTotals[months[months.length - 1]] - monthlyTotals[months[months.length - 2]]) / Math.abs(monthlyTotals[months[months.length - 2]])
         : null;
-      calculations.push({ label: 'Monthly performance', type: 'monthly_performance', value: { monthlyTotals, growth } });
+      calculations.push({
+        label: 'Monthly performance',
+        type: 'monthly_performance',
+        value: {
+          monthlyTotals,
+          growth,
+          historicalMonthsComplete: plan.timeRange?.historicalOnly === true,
+          includesCurrentMonth: plan.timeRange?.includesCurrentMonth === true,
+        },
+      });
     } else if (modules.length <= 1) {
       const value = comparison[modules[0]] || { 'this month': 0, 'last month': 0, difference: 0 };
       calculations.push({ label: 'Comparison', type: 'comparison', value });

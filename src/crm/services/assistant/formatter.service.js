@@ -75,21 +75,38 @@ function formatResponse(plan, datasets, calculations, options = {}) {
   const conversionRate = calculations.find((calculation) => calculation.type === 'conversion_rate');
   const stageDistribution = calculations.find((calculation) => calculation.type === 'stage_distribution');
   const pipeline = calculations.find((calculation) => calculation.type === 'pipeline');
+  const currentMonthLabel = plan.timeRange?.includesCurrentMonth ? 'Current Month (Month-to-Date): ' : '';
+  const crmReturnedDate = datasets.flatMap((dataset) => [dataset?.result?.info, dataset?.info])
+    .map((info) => info && (
+      info.data_available_through
+      || info.dataAvailableThrough
+      || info.available_through
+      || info.availableThrough
+      || info.through_date
+      || info.throughDate
+      || info.cutoff_date
+      || info.cutoffDate
+      || info.as_of_date
+      || info.asOfDate
+    ))
+    .find((value) => value !== undefined && value !== null && value !== '');
   const summary = conversionRate ? `CRM lead conversion rate: ${(conversionRate.value * 100).toFixed(2)}%.`
     : conversionCount ? `${conversionCount.value} converted CRM leads found.`
     : pipeline ? `Pipeline value: ${pipeline.value}.`
     : stageDistribution ? `Stage distribution: ${Object.entries(stageDistribution.value).map(([stage, value]) => `${stage} ${value}`).join(', ')}.`
-    : monthlyPerformance ? `Monthly CRM performance: ${Object.entries(monthlyPerformance.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}${monthlyPerformance.value.growth === null ? '.' : `; latest month-over-month growth ${(monthlyPerformance.value.growth * 100).toFixed(2)}%.`}`
+    : monthlyPerformance ? `${monthlyPerformance.value.includesCurrentMonth ? currentMonthLabel : ''}Monthly CRM performance: ${Object.entries(monthlyPerformance.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}${monthlyPerformance.value.growth === null ? '.' : `; latest month-over-month growth ${(monthlyPerformance.value.growth * 100).toFixed(2)}%.`}`
     : multiModuleComparison ? `CRM comparison completed for ${Object.entries(multiModuleComparison.value).map(([module, values]) => `${module}: this month ${values['this month']}, last month ${values['last month']}, difference ${values.difference}`).join('; ')}.`
     : comparison ? `CRM comparison: this month ${comparison.value['this month']}, last month ${comparison.value['last month']}, difference ${comparison.value.difference}.`
     : average ? `Average CRM deal value: ${average.value}.`
       : sum ? `Total CRM value: ${sum.value}.`
     : counts ? `CRM counts: ${Object.entries(counts.value).map(([module, value]) => `${module} ${value}`).join(', ')}.`
       : count ? `${count.value} matching records found in CRM.`
-          : `${data.length} CRM records returned.`;
+          : `${currentMonthLabel}${data.length} CRM records returned.`;
+  const labeledSummary = currentMonthLabel && !monthlyPerformance ? `${currentMonthLabel}${summary}` : summary;
+  const summaryWithAvailability = crmReturnedDate ? `${labeledSummary} Data available through ${crmReturnedDate}.` : labeledSummary;
   const response = {
     success: true,
-    summary,
+    summary: summaryWithAvailability,
     requestedInformation: plan.question,
     data,
     tables: [],

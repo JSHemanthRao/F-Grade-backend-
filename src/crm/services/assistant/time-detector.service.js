@@ -8,8 +8,8 @@ function detectTimeRange(question) {
   if (/yesterday/.test(normalizedQuestion)) detectedKeywords.push('yesterday');
   if (/this week/.test(normalizedQuestion)) detectedKeywords.push('this week');
   if (/last week/.test(normalizedQuestion)) detectedKeywords.push('last week');
-  if (/this month/.test(normalizedQuestion)) detectedKeywords.push('this month');
-  if (/last month/.test(normalizedQuestion)) detectedKeywords.push('last month');
+  if (/this month|current month|month[-\s]+to[-\s]+date/.test(normalizedQuestion)) detectedKeywords.push('this month');
+  if (/last month|previous month/.test(normalizedQuestion)) detectedKeywords.push('last month');
   if (/this quarter/.test(normalizedQuestion)) detectedKeywords.push('this quarter');
   if (/last quarter/.test(normalizedQuestion)) detectedKeywords.push('last quarter');
   if (/this year/.test(normalizedQuestion)) detectedKeywords.push('this year');
@@ -22,8 +22,23 @@ function detectTimeRange(question) {
   if (namedMonth) detectedKeywords.push(namedMonth[1]);
   if (/(?:between|from)\s+.+\s+(?:and|to)\s+.+/.test(normalizedQuestion)) detectedKeywords.push('custom date range');
 
-  const result = detectedKeywords.length > 0
-    ? { label: detectedKeywords[0], range: detectedKeywords[0].replace(/\s+/g, '_') }
+  const label = detectedKeywords[0];
+  const now = new Date();
+  const currentMonth = now.getUTCMonth();
+  const currentYear = now.getUTCFullYear();
+  const namedMonthIndex = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'].indexOf(label);
+  const namedMonthIsCurrent = namedMonthIndex >= 0 && namedMonthIndex === currentMonth;
+  const isCurrentMonth = label === 'this month';
+  const isHistoricalRange = Boolean(label && !isCurrentMonth && !namedMonthIsCurrent);
+  const result = label
+    ? {
+      label,
+      range: label.replace(/\s+/g, '_'),
+      includesCurrentMonth: isCurrentMonth || namedMonthIsCurrent,
+      historicalOnly: isHistoricalRange,
+      ...(rollingMonths ? { monthCount: Number(rollingMonths[1]) } : {}),
+      ...(namedMonthIndex >= 0 ? { year: currentYear } : {}),
+    }
     : { label: 'all time', range: 'all_time' };
 
   if (DEBUG_ASSISTANT) {

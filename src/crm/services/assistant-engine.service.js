@@ -78,7 +78,7 @@ async function handleAssistantRequest(payload = {}) {
   }
   if (!validation.valid) {
     return formatResponse(plan, merged.datasets, [], {
-      closestAnswer: 'The CRM returned partial information, so no unsupported conclusion was generated.',
+      closestAnswer: 'The CRM did not provide enough data to complete this analysis.',
       limitation: 'The requested analysis could not be completed from the available CRM data.',
     });
   }
