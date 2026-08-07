@@ -1,5 +1,6 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
 const recordsService = require('../records.service');
+const logger = require('../../../common/logging/logger');
 
 function getPeriods(step, question, contextDatasets) {
   const explicitPeriodComparison = /\bthis month\b[\s\S]*\blast month\b|\blast month\b[\s\S]*\bthis month\b/i.test(question)
@@ -49,7 +50,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
           continue;
         }
 
-        if (DEBUG_ASSISTANT) console.info('[CRM Assistant][Execution Task]', { module: moduleKey, period, type: step.type });
+        if (DEBUG_ASSISTANT) logger.info('Execution Engine', { module: moduleKey, period, type: step.type });
         const execute = (options) => step.type === 'count'
           ? recordsService.getCount(moduleKey, options)
           : recordsService.getRecords(moduleKey, options);
@@ -57,7 +58,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
         try {
           result = await execute(requestOptions);
         } catch (error) {
-          console.warn('[CRM Assistant] Retrying CRM task', { module: moduleKey, task: step.type });
+          logger.warn('Execution Engine', { module: moduleKey, task: step.type, message: 'Retrying CRM task' });
           result = await execute({
             ...requestOptions,
             force_coql: true,

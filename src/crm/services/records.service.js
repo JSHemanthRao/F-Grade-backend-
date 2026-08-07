@@ -2,6 +2,7 @@ const { zohoClient } = require('../../common/config/axios');
 const { DEBUG_ASSISTANT, NODE_ENV } = require('../../common/config/env');
 const { getModuleDefinition } = require('./module-definition.service');
 const { buildQueryPlan, isInvalidQueryError } = require('./query-builder.service');
+const logger = require('../../common/logging/logger');
 const {
   DEFAULT_PER_PAGE,
   fetchAllPages,
@@ -120,7 +121,7 @@ function logRequestDebug(moduleKey, moduleConfig, queryParams, fields) {
     return;
   }
 
-  console.debug('[Zoho CRM] Request', {
+  logger.debug('Retrieval Engine', {
     requestedModule: moduleKey,
     endpoint: moduleConfig.endpoint,
     queryParameters: queryParams,
@@ -150,7 +151,7 @@ function logRequestError(error, moduleKey, moduleConfig, queryParams, fields) {
   const requestUrl = getRequestedUrl(error?.config || {});
   const invalidFields = extractInvalidFields(error, fields);
 
-  console.error('[Zoho CRM] Request failed', {
+  logger.error('Retrieval Engine', {
     requestedModule: moduleKey,
     endpoint: moduleConfig.endpoint,
     queryParameters: queryParams,
@@ -170,7 +171,7 @@ function logRequestError(error, moduleKey, moduleConfig, queryParams, fields) {
 }
 
 function logRetrievalPlan(moduleKey, options, retrievalPlan) {
-  console.debug('[Zoho CRM] Retrieval Strategy', {
+  logger.debug('Retrieval Engine', {
     module: moduleKey,
     'Received page': options.page ?? null,
     'Received per_page': options.per_page ?? null,
@@ -180,7 +181,7 @@ function logRetrievalPlan(moduleKey, options, retrievalPlan) {
 }
 
 function logRetrievalComplete(moduleKey, pagesFetched, totalRecords, responseDetails = {}) {
-  console.debug('[Zoho CRM] Retrieval complete', {
+  logger.debug('Retrieval Engine', {
     module: moduleKey,
     'Pages fetched': pagesFetched,
     'Total merged records': totalRecords,
@@ -188,7 +189,7 @@ function logRetrievalComplete(moduleKey, pagesFetched, totalRecords, responseDet
   });
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Records Service]', {
+    logger.info('Retrieval Engine', {
       module: moduleKey,
       pagesFetched,
       totalRecords,
@@ -198,7 +199,7 @@ function logRetrievalComplete(moduleKey, pagesFetched, totalRecords, responseDet
 }
 
 function logCountComplete(moduleKey, count) {
-  console.debug('[Zoho CRM] Count complete', {
+  logger.debug('Retrieval Engine', {
     module: moduleKey,
     count,
   });
@@ -303,7 +304,7 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
   logRequestDebug(moduleKey, moduleDefinition, params, []);
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Records Service][Count]', {
+    logger.info('Retrieval Engine', {
       module: moduleKey,
       requestText,
       criteria,
@@ -319,7 +320,7 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
   const count = Number(response.data?.count ?? 0);
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Records Service][Count Result]', {
+    logger.info('Retrieval Engine', {
       module: moduleKey,
       count,
       responseData: response.data,
@@ -341,7 +342,7 @@ async function executeCountRequest(moduleKey, moduleDefinition, options = {}) {
 }
 
 function logGeneratedQuery(queryPlan) {
-  console.info('[Zoho CRM] Generated query', {
+  logger.info('Retrieval Engine', {
     mode: queryPlan.mode,
     module: queryPlan.moduleKey,
     query: queryPlan.query,
@@ -351,7 +352,7 @@ function logGeneratedQuery(queryPlan) {
 
 async function executeCoqlCount(moduleKey, moduleDefinition, queryPlan) {
   const query = `select count(id) as result_value from ${moduleDefinition.endpoint}${queryPlan.whereClause ? ` where ${queryPlan.whereClause}` : ''}`;
-  console.info('[Zoho CRM] Generated query', { mode: 'coql', module: moduleKey, query });
+  logger.info('Retrieval Engine', { mode: 'coql', module: moduleKey, query });
   const response = await zohoClient.post('/crm/v8/coql', { select_query: query });
   const row = response.data?.data?.[0] || {};
   const count = Number(row.result_value ?? row.count ?? 0);
@@ -425,7 +426,7 @@ function logPlannerDebug(moduleKey, options, retrievalPlan, moduleDefinition) {
   const paginationInterpretation = getPaginationInterpretation(options, originalUserPrompt);
   const retrievalMode = normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode);
 
-  console.debug('[Zoho CRM] Retrieval planner debug', {
+  logger.debug('Retrieval Engine', {
     module: moduleKey,
     endpoint: moduleDefinition.endpoint,
     'Original user prompt': originalUserPrompt || null,
@@ -462,7 +463,7 @@ async function getRecords(moduleKey, options = {}) {
   const shouldFetchAllPages = retrievalPlan.fetchAll;
   logPlannerDebug(normalizedKey, options, retrievalPlan, moduleDefinition);
   logRetrievalPlan(normalizedKey, options, retrievalPlan);
-  console.debug('[Zoho CRM] Retrieval mode decision', {
+  logger.debug('Retrieval Engine', {
     module: normalizedKey,
     'retrieval_mode received': normalizeRetrievalMode(options.retrieval_mode ?? options.retrievalMode),
     'retrieval strategy selected': retrievalPlan.strategy,
@@ -496,7 +497,7 @@ async function getRecords(moduleKey, options = {}) {
   }
 
   if (normalizedKey === 'users') {
-    console.debug('[Zoho CRM] Calling Users API');
+    logger.debug('Retrieval Engine', { message: 'Calling Users API' });
 
     try {
       const params = {
@@ -546,7 +547,7 @@ async function getRecords(moduleKey, options = {}) {
         info: response.data.info || {},
       };
     } catch (error) {
-      console.error('[Zoho CRM] Users API Error', {
+      logger.error('Retrieval Engine', {
         status: error.response?.status,
         data: error.response?.data,
       });
@@ -594,7 +595,7 @@ async function getRecords(moduleKey, options = {}) {
     } catch (error) {
       if (!isInvalidQueryError(error) || queryPlan.mode !== 'search') throw error;
       const fallbackPlan = buildQueryPlan(normalizedKey, { ...effectiveOptions, force_coql: true });
-      console.warn('[Zoho CRM] Search query was rejected; retrying with COQL', { module: normalizedKey, reason: error.response?.data });
+      logger.warn('Retrieval Engine', { module: normalizedKey, reason: error.response?.data, message: 'Retrying with COQL' });
       return executeCoqlRecords(normalizedKey, fallbackPlan, effectiveOptions);
     }
 

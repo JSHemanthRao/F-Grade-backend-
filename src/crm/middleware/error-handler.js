@@ -1,4 +1,5 @@
 const { resolveRequestedModule } = require('../validators/crm.validator');
+const logger = require('../../common/logging/logger');
 
 function stringifyMessage(message) {
   if (typeof message === 'string') {
@@ -34,7 +35,7 @@ function crmErrorHandler(err, req, res, next) {
     payload.details = err?.response?.data || null;
   }
 
-  console.error('[CRM] Error', {
+  logger.error('CRM Error', {
     endpoint: req.originalUrl,
     module: moduleKey || 'unknown',
     status,

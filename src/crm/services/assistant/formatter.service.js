@@ -4,6 +4,7 @@ const {
   chooseFallback,
   logFallbackReason,
 } = require('./fallback-engine.service');
+const logger = require('../../../common/logging/logger');
 
 function formatResponse(plan, datasets, calculations, options = {}) {
   if (options.conversionFallback) {
@@ -120,7 +121,7 @@ function formatResponse(plan, datasets, calculations, options = {}) {
   };
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Formatter] ↓', {
+    logger.info('Response Engine', {
       summary,
       requestedInformation: plan.question,
       calculations,

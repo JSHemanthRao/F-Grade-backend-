@@ -1,4 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
+const logger = require('../../../common/logging/logger');
 
 const MODULE_PATTERNS = {
   leads: /\b(lead|leads|prospect|prospects)\b/i,
@@ -38,7 +39,7 @@ function logModuleDebug(question, normalizedQuestion, tokens, normalizedTokens, 
     return;
   }
 
-  console.info('[CRM Assistant][Module Detector]', {
+  logger.info('Module Detector', {
     originalQuestion: question,
     normalizedQuestion,
     tokens,
@@ -65,7 +66,7 @@ function detectModules(question = '') {
     }
   } catch (error) {
     if (DEBUG_ASSISTANT) {
-      console.error('[CRM Assistant][Module Detector] Error', error);
+      logger.error('Module Detector', error);
     }
   }
 

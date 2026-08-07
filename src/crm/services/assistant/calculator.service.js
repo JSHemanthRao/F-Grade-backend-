@@ -1,4 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
+const logger = require('../../../common/logging/logger');
 
 function calculateResult(plan, datasets) {
   const calculations = [];
@@ -8,7 +9,7 @@ function calculateResult(plan, datasets) {
   const countValue = getResult(datasets[0]).count ?? getResult(datasets[0]).info?.count ?? getRecords(datasets[0]).length;
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Calculator]', {
+    logger.info('Analytics Engine', {
       calculationType: 'count',
       inputValues: datasets.map(getResult),
       output: countValue,
@@ -154,7 +155,7 @@ function calculateResult(plan, datasets) {
     }
   }
 
-  if (DEBUG_ASSISTANT) console.info('[CRM Assistant][Calculation] ↓', { calculations });
+  if (DEBUG_ASSISTANT) logger.info('Analytics Engine', { calculations });
 
   return calculations;
 }

@@ -276,7 +276,7 @@ function normalizeRetrievalMode(value) {
 }
 
 function logPageResponseDebug({ moduleKey, page, pageToken, info, recordsFetched }) {
-  console.debug('[Zoho CRM] Zoho page fetched', {
+  logger.debug('Retrieval Engine', {
     Module: moduleKey,
     'Zoho page fetched': page,
     'Records on page': recordsFetched,
@@ -288,7 +288,7 @@ function logPageResponseDebug({ moduleKey, page, pageToken, info, recordsFetched
 }
 
 function logPaginationStopDebug({ moduleKey, page, pageToken, reason, info }) {
-  console.debug('[Zoho CRM] Pagination stopped', {
+  logger.debug('Retrieval Engine', {
     Module: moduleKey,
     'Zoho page fetched': page,
     reason,
@@ -519,7 +519,7 @@ async function fetchAllPages({
 
     lastPayload = payload || {};
 
-    console.debug('[Zoho CRM] Pagination request', {
+    logger.debug('Retrieval Engine', {
       Module: moduleKey,
       mode,
       page: params.page ?? null,
@@ -634,3 +634,4 @@ module.exports = {
   hasFullRetrievalIntent,
   inferEqualityCriteria,
 };
+const logger = require('../../common/logging/logger');

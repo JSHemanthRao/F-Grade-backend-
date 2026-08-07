@@ -2,6 +2,7 @@ const { DEBUG_ASSISTANT } = require('../../../common/config/env');
 const { detectIntents } = require('./intent-detector.service');
 const { detectModules, normalizeQuestion, tokenizeQuestion } = require('./module-detector.service');
 const { detectTimeRange } = require('./time-detector.service');
+const logger = require('../../../common/logging/logger');
 
 function detectPagination(question, module) {
   const text = String(question || '').trim().toLowerCase();
@@ -62,7 +63,7 @@ function buildExecutionPlan(question, context = {}) {
   };
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Execution Planner]', {
+    logger.info('Planner Engine', {
       originalQuestion: question,
       normalizedQuestion,
       tokens,

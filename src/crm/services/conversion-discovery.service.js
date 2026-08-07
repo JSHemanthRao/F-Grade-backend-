@@ -1,5 +1,6 @@
 const { zohoClient } = require('../../common/config/axios');
 const { getModuleDefinition } = require('./module-definition.service');
+const logger = require('../../common/logging/logger');
 
 const CONVERSION_FIELD_CANDIDATES = [
   'Converted',
@@ -29,7 +30,7 @@ async function discoverLeadConversionFields() {
   }
 
   try {
-    console.info('[CRM Assistant][Conversion] CRM call: inspect Lead field metadata', {
+    logger.info('Conversion Discovery', {
       endpoint: '/crm/v8/settings/fields',
       module: 'Leads',
       fieldsInspected: CONVERSION_FIELD_CANDIDATES,
@@ -37,10 +38,10 @@ async function discoverLeadConversionFields() {
     const response = await zohoClient.get('/crm/v8/settings/fields', { params: { module: 'Leads' } });
     const rawFields = response.data?.fields || response.data?.data || [];
     const fields = rawFields.map(normalizeField).filter(isConversionField);
-    console.info('[CRM Assistant][Conversion] Fields inspected', { fields, fieldCount: rawFields.length });
+    logger.info('Conversion Discovery', { fields, fieldCount: rawFields.length });
     return { fields, source: 'zoho_metadata', metadataAvailable: true, error: null };
   } catch (error) {
-    console.warn('[CRM Assistant][Conversion] Metadata lookup failed', {
+    logger.warn('Conversion Discovery', {
       reason: error?.response?.data?.code || error?.message,
     });
     return { fields: [], source: 'zoho_metadata', metadataAvailable: false, error };

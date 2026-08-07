@@ -4,6 +4,7 @@ const FALLBACK_REASONS = Object.freeze({
   INSUFFICIENT_DATA: 'INSUFFICIENT_DATA',
   INVALID_QUERY: 'INVALID_QUERY',
 });
+const logger = require('../../../common/logging/logger');
 
 const SAFE_MESSAGES = Object.freeze({
   [FALLBACK_REASONS.EMPTY_RESULT]: 'No matching CRM records were found for the requested period.',
@@ -14,7 +15,7 @@ const SAFE_MESSAGES = Object.freeze({
 
 function logFallbackReason(reason, details = {}) {
   // Reason codes are deliberately restricted to this internal log entry.
-  console.info('[CRM Assistant][Fallback Decision]', { reason, ...details });
+  logger.info('Fallback Decision', { reason, ...details });
 }
 
 function chooseFallback({ exactAnswer, closestAnswer, clarifyingQuestion, reason = FALLBACK_REASONS.EMPTY_RESULT } = {}) {

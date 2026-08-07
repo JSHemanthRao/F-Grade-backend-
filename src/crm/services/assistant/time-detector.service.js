@@ -1,4 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
+const logger = require('../../../common/logging/logger');
 
 function detectTimeRange(question) {
   const normalizedQuestion = String(question || '').trim().toLowerCase();
@@ -42,7 +43,7 @@ function detectTimeRange(question) {
     : { label: 'all time', range: 'all_time' };
 
   if (DEBUG_ASSISTANT) {
-    console.info('[CRM Assistant][Time Detector]', {
+    logger.info('Time Detector', {
       originalQuestion: question,
       detectedTimeKeywords: detectedKeywords,
       resolvedStartDate: null,

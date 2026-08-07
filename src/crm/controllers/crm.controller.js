@@ -3,6 +3,7 @@ const recordsService = require('../services/records.service');
 const { resolveRequestedModule } = require('../validators/crm.validator');
 const { getModuleDefinition } = require('../services/module-definition.service');
 const assistantEngine = require('../services/assistant-engine.service');
+const logger = require('../../common/logging/logger');
 
 function formatExecutionTime(startTime) {
   const elapsedNanoSeconds = process.hrtime.bigint() - startTime;
@@ -85,7 +86,7 @@ async function getModuleQuery(req, res, next) {
     const startTime = process.hrtime.bigint();
     const options = buildCommonOptions(req);
 
-    console.info('[Zoho CRM] Operation selected', {
+    logger.info('Retrieval Engine', {
       module: moduleDefinition.label,
       operation: 'query',
     });
@@ -117,7 +118,7 @@ async function getModuleCount(req, res, next) {
       retrieval_mode: 'count',
     };
 
-    console.info('[Zoho CRM] Operation selected', {
+    logger.info('Retrieval Engine', {
       module: moduleDefinition.label,
       operation: 'count',
     });
@@ -141,7 +142,7 @@ async function handleAssistantRequest(req, res, next) {
     }
 
     if (DEBUG_ASSISTANT) {
-      console.info('[CRM Assistant][Controller]', {
+      logger.info('Assistant Controller', {
         receivedRequest: {
           method: req.method,
           url: req.originalUrl || req.url,

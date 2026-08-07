@@ -1,4 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
+const logger = require('../../../common/logging/logger');
 
 const INTENT_ORDER = ['CONVERSION', 'COUNT', 'LIST', 'SEARCH', 'FILTER', 'COMPARE', 'SUMMARY', 'ANALYTICS', 'AGGREGATION', 'EXPLAIN'];
 
@@ -20,7 +21,7 @@ function logIntentDebug(question, normalizedQuestion, matchedKeywords, detectedI
     return;
   }
 
-  console.info('[CRM Assistant][Intent Detector]', {
+  logger.info('Intent Detector', {
     originalQuestion: question,
     normalizedQuestion,
     matchedKeywords,
@@ -44,7 +45,7 @@ function detectIntents(question) {
     });
   } catch (error) {
     if (DEBUG_ASSISTANT) {
-      console.error('[CRM Assistant][Intent Detector] Error', error);
+      logger.error('Intent Detector', error);
     }
   }
 

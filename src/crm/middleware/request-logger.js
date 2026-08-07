@@ -1,4 +1,5 @@
 const { resolveRequestedModule } = require('../validators/crm.validator');
+const logger = require('../../common/logging/logger');
 
 function formatExecutionTime(start) {
   const elapsed = process.hrtime.bigint() - start;
@@ -10,7 +11,7 @@ function requestLogger(req, res, next) {
   const moduleName = resolveRequestedModule(req);
 
   res.on('finish', () => {
-    console.info('[CRM] Request', {
+    logger.info('CRM Request', {
       endpoint: req.originalUrl,
       method: req.method,
       module: moduleName || 'unknown',

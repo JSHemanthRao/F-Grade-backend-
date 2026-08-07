@@ -1,19 +1,14 @@
 const express = require('express');
 const { APP_NAME } = require('./common/config/env');
-const { loadProducts } = require('./common/helpers/product-loader');
+const crm = require('./crm');
 
 function createApp() {
   const app = express();
-  const products = loadProducts();
-
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  app.locals.products = products;
-  app.locals.openapiSpecs = products.reduce((specs, product) => {
-    specs[product.name] = product.openapiSpec;
-    return specs;
-  }, {});
+  app.locals.products = [crm];
+  app.locals.openapiSpecs = { [crm.name]: crm.openapiSpec };
 
   const sendHealthPayload = (req, res) => {
     const payload = {
@@ -28,9 +23,7 @@ function createApp() {
   app.get('/health', sendHealthPayload);
   app.get('/api/health', sendHealthPayload);
 
-  products.forEach((product) => {
-    app.use(product.basePath, product.router);
-  });
+  app.use(crm.basePath, crm.router);
 
   app.use((err, req, res, next) => {
     const status = err?.response?.status || err?.status || 500;

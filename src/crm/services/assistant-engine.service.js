@@ -11,6 +11,7 @@ const { formatResponse } = require('./assistant/formatter.service');
 const { detectModule } = require('./assistant/module-detector.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
 const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
+const logger = require('../../common/logging/logger');
 
 async function getConversionFallback(question, plan) {
   const period = plan.timeRange.label === 'all time' ? 'the requested period' : plan.timeRange.label;
@@ -19,7 +20,7 @@ async function getConversionFallback(question, plan) {
       const result = await recordsService.getCount(module, { question: `How many ${module} were created ${period}?`, retrieval_mode: 'count' });
       return { module, count: Number(result?.info?.count ?? 0), available: true };
     } catch (error) {
-      console.warn('[CRM Assistant][Fallback] CRM alternative unavailable', { module });
+      logger.warn('Fallback', { module, message: 'CRM alternative unavailable' });
       return { module, count: null, available: false };
     }
   }));
@@ -37,7 +38,7 @@ async function handleAssistantRequest(payload = {}) {
   const moduleCandidates = plan.modules.length > 0 ? plan.modules : (detectModule(question) ? [detectModule(question)] : []);
   if (!moduleCandidates.length) return { success: false, message: 'I could not identify the CRM information needed to answer that question.' };
 
-  if (DEBUG_ASSISTANT) console.info('[CRM Assistant][Pipeline] Plan optimized', { tasks: plan.steps.length, modules: plan.modules });
+  if (DEBUG_ASSISTANT) logger.info('Assistant Pipeline', { tasks: plan.steps.length, modules: plan.modules });
 
   let conversionDiscovery = null;
   if (plan.intents.includes('CONVERSION')) {
@@ -55,7 +56,7 @@ async function handleAssistantRequest(payload = {}) {
   try {
     datasets = await executePlan({ plan, question, moduleCandidates, context, conversionDiscovery });
   } catch (error) {
-    console.error('[CRM Assistant][Pipeline] Execution failed', { module: moduleCandidates[0] });
+    logger.error('Assistant Pipeline', { module: moduleCandidates[0], message: 'Execution failed' });
     if (plan.steps.some((step) => step.type === 'conversion_count')) {
       return formatResponse(plan, [], [], { conversionFallback: await getConversionFallback(question, plan) });
     }
