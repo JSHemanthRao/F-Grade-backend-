@@ -79,11 +79,59 @@ test('RetrievalEngine fetches all pages for search and filter queries', async ()
   };
 
   try {
-    const result = await RetrievalEngine.getRecords('deals', { search: 'Deals above ₹5,00,000' });
+    const result = await RetrievalEngine.getRecords('deals', { question: 'Deals above ₹5,00,000' });
     assert.equal(requests.length, 2);
     assert.deepEqual(requests.map((params) => params.page), [1, 2]);
     assert.deepEqual(requests.map((params) => params.per_page), [200, 200]);
     assert.deepEqual(result.data, [{ id: 'deal-1' }, { id: 'deal-2' }]);
+  } finally {
+    restoreZoho(originalGet, zohoClient.post);
+  }
+});
+
+test('RetrievalEngine finds a match only on page 5 for deep pagination queries', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  zohoClient.get = async (_url, config) => {
+    requests.push(config.params);
+    const pageNumber = requests.length;
+    const hasMore = pageNumber < 5;
+    return {
+      data: {
+        data: [{ id: `deal-${pageNumber}` }],
+        info: { more_records: hasMore },
+      },
+    };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', { question: 'Find SG Compu Tech' });
+    assert.equal(requests.length, 5);
+    assert.equal(result.data.length, 5);
+    assert.equal(result.data[4].id, 'deal-5');
+  } finally {
+    restoreZoho(originalGet, zohoClient.post);
+  }
+});
+
+test('RetrievalEngine only returns no matches after all pages are fetched', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [], info: { more_records: true } },
+    { data: [], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (_url, config) => {
+    requests.push(config.params);
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', { question: 'Search for non-existent deals' });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(result.data, []);
+    assert.equal(result.info.recordCount, 0);
   } finally {
     restoreZoho(originalGet, zohoClient.post);
   }

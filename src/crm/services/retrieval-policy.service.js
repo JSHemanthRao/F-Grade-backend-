@@ -477,14 +477,14 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       : buildOrCriteria(getSearchableFields(moduleDefinition), specificSearchTerm);
 
     return {
-      strategy: RETRIEVAL_STRATEGIES.SINGLE_RECORD,
-      fetchAll: false,
+      strategy: RETRIEVAL_STRATEGIES.FULL_DATASET,
+      fetchAll: true,
       params: {
         page: 1,
-        per_page: SINGLE_RECORD_PER_PAGE,
+        per_page: DEFAULT_PER_PAGE,
         ...(criteria ? { criteria } : {}),
       },
-      reason: 'specific_record_intent',
+      reason: 'specific_record_search',
       retrievalMode,
     };
   }

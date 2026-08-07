@@ -681,17 +681,26 @@ async function getRecords(moduleKey, options = {}) {
       }
       if (lastError) throw lastError;
 
-      logRetrievalComplete(normalizedKey, pagesFetched, totalRecords, {
-        source: 'crm_records_api',
-        resultPreview: result?.data?.slice(0, 3) || [],
-      });
-      return cacheResult(addRetrievalMetadata(
+      const merged = addRetrievalMetadata(
         result,
         effectiveOptions,
         result?.info?.pagesFetched || pagesFetched,
         result?.info?.retrievalComplete !== false,
         result?.info?.duplicateRecordsRemoved || 0,
-      ));
+      );
+
+      logger.info('Retrieval', {
+        module: normalizedKey,
+        pagesFetched: merged.info.pagesFetched,
+        mergedRecords: merged.info.recordCount,
+        retrievalComplete: merged.info.retrievalComplete,
+      });
+
+      logRetrievalComplete(normalizedKey, pagesFetched, totalRecords, {
+        source: 'crm_records_api',
+        resultPreview: merged.data?.slice(0, 3) || [],
+      });
+      return cacheResult(merged);
     }
 
     let response;
