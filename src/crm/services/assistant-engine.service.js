@@ -64,16 +64,20 @@ async function handleAssistantRequest(payload = {}) {
   }
 
   let merged = mergeDatasets(datasets);
-  let { calculations, limitations } = calculateResult(plan, merged.datasets);
-  let validation = validateExecution({ plan, question, datasets: merged.datasets, calculations, limitations });
+  const result = calculateResult(plan, merged.datasets);
+  let validation = validateExecution({ plan, question, datasets: merged.datasets, calculations: result.calculations, limitations: result.limitations });
+  let calculations = validation.hasOwnProperty('calculations') ? validation.calculations : result.calculations;
+  let limitations = validation.hasOwnProperty('limitations') ? validation.limitations : result.limitations;
   if (!validation.valid && validation.issues.includes('dataset_incomplete')) {
     for (const dataset of merged.datasets.filter((item) => item.result?.info?.more_records === true && !item.step?.explicit)) {
       const options = { question, fields: dataset.step.requiredFieldsByModule?.[dataset.module], retrieval_mode: 'all', force_coql: true };
       dataset.result = await recordsService.getRecords(dataset.module, options);
     }
     merged = mergeDatasets(merged.datasets);
-    ({ calculations, limitations } = calculateResult(plan, merged.datasets));
-    validation = validateExecution({ plan, question, datasets: merged.datasets, calculations, limitations });
+    const retryResult = calculateResult(plan, merged.datasets);
+    validation = validateExecution({ plan, question, datasets: merged.datasets, calculations: retryResult.calculations, limitations: retryResult.limitations });
+    calculations = validation.hasOwnProperty('calculations') ? validation.calculations : retryResult.calculations;
+    limitations = validation.hasOwnProperty('limitations') ? validation.limitations : retryResult.limitations;
   }
   if (!validation.valid) {
     return formatResponse(plan, merged.datasets, calculations, {

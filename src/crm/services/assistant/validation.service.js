@@ -44,8 +44,37 @@ function sumAmounts(records, predicate = () => true) {
   }, 0);
 }
 
+function normalizeLabel(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'object') {
+    return String(value.name ?? value.Name ?? value.full_name ?? value.fullName ?? value.company ?? value.Company ?? value.label ?? value.Label ?? value);
+  }
+  return String(value);
+}
+
 function getTrainingFields(record, fields) {
   return fields.map((field) => record?.[field]).find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function validateRankingMetric(calculation, records, fields) {
+  const values = calculation.value;
+  if (!Array.isArray(values) || values.length === 0) return { valid: false };
+  const counts = groupCount(records, (record) => normalizeLabel(getTrainingFields(record, fields)));
+  const seenLabels = new Set();
+  for (const item of values) {
+    if (!item || typeof item !== 'object' || typeof item.count !== 'number') return { valid: false };
+    const labelKeys = Object.keys(item).filter((key) => key !== 'count');
+    if (labelKeys.length !== 1) return { valid: false };
+    const rawLabel = item[labelKeys[0]];
+    const label = normalizeLabel(rawLabel);
+    if (label === null || label === '') return { valid: false };
+    if (seenLabels.has(label)) return { valid: false };
+    seenLabels.add(label);
+    if (!Object.prototype.hasOwnProperty.call(counts, label)) return { valid: false };
+    if (counts[label] !== item.count) return { valid: false };
+  }
+  return { valid: true };
 }
 
 function hasStage(record) {
@@ -179,10 +208,20 @@ function validateMetric(calculation, records, datasets, plan) {
     const expected = (currentValue - previousValue) / Math.abs(previousValue);
     return { valid: Math.abs(value.growth - expected) < 1e-6 };
   }
-  if (type === 'top_owners' || type === 'top_sales_representatives' || type === 'top_stages' || type === 'top_products' || type === 'top_lead_sources' || type === 'top_customers') {
-    if (!Array.isArray(value)) return { valid: false };
-    const labels = value.map((item) => Object.values(item)[0]);
-    return new Set(labels).size === labels.length;
+  if (type === 'top_owners' || type === 'top_sales_representatives') {
+    return validateRankingMetric(calculation, actualRecords, ['Owner', 'Owner_Name', 'owner', 'owner_name']);
+  }
+  if (type === 'top_stages') {
+    return validateRankingMetric(calculation, actualRecords, ['Stage', 'Status', 'Deal_Stage', 'Stage_Name']);
+  }
+  if (type === 'top_products') {
+    return validateRankingMetric(calculation, actualRecords, ['Product_Name', 'Product', 'product_name', 'product']);
+  }
+  if (type === 'top_lead_sources') {
+    return validateRankingMetric(calculation, actualRecords, ['Lead_Source', 'LeadSource', 'lead_source']);
+  }
+  if (type === 'top_customers') {
+    return validateRankingMetric(calculation, actualRecords, ['Account_Name', 'Customer_Name', 'Company', 'account_name', 'customer_name', 'company']);
   }
   return { valid: true };
 }
@@ -207,7 +246,7 @@ function validateResponse({ response, plan, datasets, calculations, limitations 
     }
   });
 
-  return { valid: issues.length === 0, issues, warnings };
+  return { valid: issues.length === 0, issues: [...new Set(issues)], warnings };
 }
 
 function validateExecution({ plan, question, datasets, calculations, limitations = [] }) {
