@@ -97,3 +97,35 @@ test('follow-up questions use fields present in returned CRM records', () => {
   assert.ok(response.suggestedNextAnalysis.length > 0);
   assert.doesNotMatch(JSON.stringify(response.suggestedNextAnalysis), /forecast|dashboard|report|analytics|chart/i);
 });
+
+test('response coverage uses business-facing incomplete-period labels', () => {
+  const response = formatResponse(
+    { question: 'Monthly deal values', timeRange: detectTimeRange('last 3 months'), steps: [], modules: ['deals'], intents: ['COMPARE'] },
+    [{ module: 'deals', result: { data: [{ id: 'd1', Closing_Date: '2026-06-10', Amount: 100 }], info: { more_records: true } } }],
+    [],
+  );
+
+  assert.equal(response.retrievedDataCoverage.dataCoverage, response.retrievedDataCoverage.retrievedDataCoverage);
+  assert.deepEqual(response.retrievedDataCoverage.unavailablePeriods, response.retrievedDataCoverage.monthsWithoutRetrievedRecords);
+  assert.doesNotMatch(JSON.stringify(response), /retrieved dataset|first page|latest records|pagination|backend|api|connector|approx\.?|around|roughly|approximately|~/i);
+});
+
+test('response keeps only factual business observations', () => {
+  const response = formatResponse(
+    { question: 'Deal values', timeRange: { label: 'all time', range: 'all_time' }, steps: [], modules: ['deals'], intents: ['LIST'] },
+    [{ module: 'deals', result: { data: [{ id: 'd1', Owner: { name: 'Asha' }, Amount: 500 }], info: { retrievalComplete: true } } }],
+    [],
+    {
+      insights: [
+        { type: 'increase', message: 'August value increased from 100 in July to 500 in August.' },
+        { type: 'top_performer', message: 'Sales performance surged.' },
+        { type: 'unsupported', message: 'Pipeline remains strong.' },
+      ],
+    },
+  );
+
+  assert.deepEqual(response.businessObservations, [
+    { type: 'increase', message: 'August value increased from 100 in July to 500 in August.' },
+  ]);
+  assert.doesNotMatch(JSON.stringify(response), /surged|strong momentum|healthy growth|pipeline remains strong/i);
+});

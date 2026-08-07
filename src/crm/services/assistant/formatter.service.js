@@ -78,7 +78,7 @@ function buildCoverage(plan, datasets, records) {
     ? `Data available through ${returnedThrough}.`
     : complete
       ? 'CRM records cover the requested query.'
-      : 'Coverage for the full requested query could not be confirmed from the returned CRM metadata.';
+      : 'Coverage for the full requested period could not be confirmed.';
 
   return {
     requestedPeriod: plan.timeRange?.label || 'the requested period',
@@ -89,8 +89,9 @@ function buildCoverage(plan, datasets, records) {
   };
 }
 
-function amountOf(record) {
-  return Number(record.Amount ?? record.amount ?? record.value ?? record.Grand_Total ?? 0) || 0;
+function hasAmount(record) {
+  const value = record?.Amount ?? record?.amount ?? record?.value ?? record?.Grand_Total;
+  return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value));
 }
 
 function metricSummary(calculations, dataLength) {
@@ -106,28 +107,52 @@ function metricSummary(calculations, dataLength) {
   const count = calculations.find((item) => item.type === 'count');
   const counts = calculations.find((item) => item.type === 'counts');
 
-  if (conversionRate) return `CRM lead conversion rate: ${(conversionRate.value * 100).toFixed(2)}%.`;
-  if (conversionCount) return `${conversionCount.value} converted CRM leads found.`;
+  if (conversionRate) return `Lead conversion rate: ${(conversionRate.value * 100).toFixed(2)}%.`;
+  if (conversionCount) return `${conversionCount.value} converted leads.`;
   if (pipeline) return `Pipeline value: ${pipeline.value}.`;
   if (stageDistribution) return `Stage distribution: ${Object.entries(stageDistribution.value).map(([stage, value]) => `${stage} ${value}`).join(', ')}.`;
-  if (monthly) return `Monthly CRM values: ${Object.entries(monthly.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}.`;
-  if (multi) return `CRM comparison calculated: ${Object.entries(multi.value).map(([module, values]) => `${module} this month ${values['this month']}, last month ${values['last month']}, difference ${values.difference}`).join('; ')}.`;
-  if (comparison) return `CRM comparison calculated: this month ${comparison.value['this month']}, last month ${comparison.value['last month']}, difference ${comparison.value.difference}.`;
-  if (average) return `Average CRM deal value: ${average.value}.`;
-  if (sum) return `Total CRM value: ${sum.value}.`;
-  if (counts) return `CRM counts: ${Object.entries(counts.value).map(([module, value]) => `${module} ${value}`).join(', ')}.`;
-  if (count) return `${count.value} matching records found in CRM.`;
-  return `${dataLength} CRM records returned.`;
+  if (monthly) return `Monthly values: ${Object.entries(monthly.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}.`;
+  if (multi) return `comparison: ${Object.entries(multi.value).map(([module, values]) => `${module}: this month ${values['this month']}, last month ${values['last month']}, difference ${values.difference}`).join('; ')}.`;
+  if (comparison) return `comparison: this month ${comparison.value['this month']}; last month ${comparison.value['last month']}; difference ${comparison.value.difference}.`;
+  if (average) return `Average deal value: ${average.value}.`;
+  if (sum) return `Total value: ${sum.value}.`;
+  if (counts) return `Record counts: ${Object.entries(counts.value).map(([module, value]) => `${module} ${value}`).join(', ')}.`;
+  if (count) return `${count.value} matching ${Number(count.value) === 1 ? 'record' : 'records'}.`;
+  return `${dataLength} ${dataLength === 1 ? 'record' : 'records'}.`;
+}
+
+function ownerName(record) {
+  const owner = record?.Owner || record?.Owner_Name || record?.owner;
+  if (typeof owner === 'string') return owner;
+  return owner?.name || owner?.Name || owner?.full_name || null;
 }
 
 function dataBackedFollowUps(records, coverage) {
   const questions = [];
-  const hasOwners = records.some((record) => record.Owner || record.Owner_Name || record.owner);
-  const hasAmounts = records.some((record) => amountOf(record) !== 0);
-  if (hasOwners) questions.push('Which returned CRM owner should be compared?');
-  if (hasAmounts) questions.push('Which returned CRM values should be compared?');
-  if (coverage.monthsWithData.length > 1) questions.push('Which returned months should be compared?');
+  const owners = [...new Set(records.map(ownerName).filter(Boolean))];
+  const hasAmounts = records.some(hasAmount);
+  if (owners.length > 0) questions.push(`Compare records by owner: ${owners.slice(0, 3).join(', ')}.`);
+  if (coverage.monthsWithData.length > 1) questions.push(`Compare record counts across ${coverage.monthsWithData.join(', ')}.`);
+  if (hasAmounts && questions.length < 2) questions.push('Show records with recorded amounts.');
   return questions.slice(0, 2);
+}
+
+const FACTUAL_OBSERVATION_TYPES = new Set([
+  'highest_value',
+  'lowest_value',
+  'top_performer',
+  'bottom_performer',
+  'increase',
+  'decrease',
+]);
+
+function factualObservations(observations) {
+  return (Array.isArray(observations) ? observations : [])
+    .filter((observation) => observation
+      && FACTUAL_OBSERVATION_TYPES.has(observation.type)
+      && typeof observation.message === 'string'
+      && !/approx\.?|around|roughly|approximately|~|latest records|retrieved dataset|first page|pagination|backend|api|connector|surged|strong momentum|healthy growth|pipeline remains strong/i.test(observation.message))
+    .map((observation) => ({ type: observation.type, message: observation.message }));
 }
 
 function formatResponse(plan, datasets, calculations, options = {}) {
@@ -137,11 +162,11 @@ function formatResponse(plan, datasets, calculations, options = {}) {
   const conversionUnavailable = Boolean(options.conversionFallback) || calculations.some((calculation) => calculation.type === 'conversion_unavailable');
   const limitations = [];
   if (options.limitation) limitations.push(options.limitation);
-  if (!coverage.complete && coverage.requestedPeriod !== 'the requested period') limitations.push('The returned CRM data does not cover the entire requested period.');
-  if (requestedMonths(plan).length > 0 && records.length > 0 && coverage.monthsWithData.length === 0) limitations.push('The returned CRM records do not contain a usable date field for month coverage.');
+  if (!coverage.complete && coverage.requestedPeriod !== 'the requested period') limitations.push('Available CRM data does not cover the entire requested period.');
+  if (requestedMonths(plan).length > 0 && records.length > 0 && coverage.monthsWithData.length === 0) limitations.push('Available CRM records do not contain a usable date field for month coverage.');
 
   if (conversionUnavailable) {
-    limitations.push('Lead conversion cannot be calculated because the required conversion fields were not available in the returned CRM records.');
+    limitations.push('Lead conversion cannot be calculated because the required conversion fields were not available in the CRM records.');
     calculations = calculations.filter((calculation) => calculation.type !== 'conversion_unavailable');
   }
 
@@ -154,14 +179,14 @@ function formatResponse(plan, datasets, calculations, options = {}) {
   }
 
   const summary = conversionUnavailable
-    ? 'Lead conversion cannot be calculated from the returned CRM records.'
+    ? 'Lead conversion cannot be calculated from the CRM records.'
     : records.length === 0 && calculations.length === 0
       ? chooseFallback({ reason: options.emptyReason || FALLBACK_REASONS.EMPTY_RESULT }).answer
       : `${currentMonthLabel}${metricSummary(calculations, records.length)}`;
   const summaryWithAvailability = crmReturnedDate(datasets)
     ? `${summary} Data available through ${crmReturnedDate(datasets)}.`
     : summary;
-  const observations = options.insights || [];
+  const observations = factualObservations(options.insights);
   const followUps = dataBackedFollowUps(records, coverage);
   const response = {
     success: true,
@@ -169,8 +194,10 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     retrievedDataCoverage: {
       requestedPeriod: coverage.requestedPeriod,
       retrievedDataCoverage: coverage.retrievedDataCoverage,
+      dataCoverage: coverage.retrievedDataCoverage,
       monthsWithData: coverage.monthsWithData,
       monthsWithoutRetrievedRecords: coverage.monthsWithoutRetrievedRecords,
+      unavailablePeriods: coverage.monthsWithoutRetrievedRecords,
     },
     requestedInformation: plan.question,
     calculatedMetrics: calculations,

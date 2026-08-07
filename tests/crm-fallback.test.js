@@ -7,7 +7,7 @@ const plan = { question: 'CRM metric', modules: ['leads'], steps: [] };
 
 test('fallback returns the exact CRM-backed answer when records exist', () => {
   const response = formatResponse(plan, [{ result: { data: [{ id: '1' }] } }], []);
-  assert.equal(response.summary, '1 CRM records returned.');
+  assert.equal(response.summary, '1 record.');
 });
 
 test('fallback distinguishes an empty matching result', () => {
@@ -17,7 +17,7 @@ test('fallback distinguishes an empty matching result', () => {
 
 test('fallback gives a business explanation for unsupported metrics', () => {
   const response = formatResponse(plan, [], [], { emptyReason: 'UNSUPPORTED_METRIC' });
-  assert.equal(response.summary, "I couldn't calculate this metric because the returned CRM records do not contain the required information.");
+  assert.equal(response.summary, "I couldn't calculate this metric because the CRM records do not contain the required information.");
   assert.equal(JSON.stringify(response).includes('UNSUPPORTED_METRIC'), false);
 });
 
@@ -25,7 +25,7 @@ test('fallback returns the closest supported business metrics', () => {
   const response = formatResponse(plan, [], [], {
     conversionFallback: { period: 'last month', leadCount: 120, dealCount: 84 },
   });
-  assert.equal(response.summary, 'Lead conversion cannot be calculated from the returned CRM records.');
+  assert.equal(response.summary, 'Lead conversion cannot be calculated from the CRM records.');
   assert.equal(response.calculatedMetrics.length, 0);
   assert.match(response.limitations.join(' '), /required conversion fields/);
   assert.doesNotMatch(JSON.stringify(response), /120|84/);

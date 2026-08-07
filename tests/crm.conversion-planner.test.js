@@ -65,7 +65,7 @@ test('conversion execution discovers fields, calculates metrics, and does not gu
     zohoClient.get = async () => ({ data: { fields: [] } });
     recordsService.getCount = async (module) => ({ info: { count: module === 'leads' ? 12 : 7 }, data: [] });
     const unavailable = await assistantEngine.handleAssistantRequest({ question: 'How many leads were converted last month?' });
-    assert.equal(unavailable.summary, 'Lead conversion cannot be calculated from the returned CRM records.');
+  assert.equal(unavailable.summary, 'Lead conversion cannot be calculated from the CRM records.');
     assert.match(unavailable.limitations.join(' '), /required conversion fields/);
     assert.doesNotMatch(JSON.stringify(unavailable), /12 new leads|7 new deals/);
     assert.equal(JSON.stringify(unavailable).includes('Converted_Date_Time'), false);

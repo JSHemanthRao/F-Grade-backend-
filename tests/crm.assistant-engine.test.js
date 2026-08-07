@@ -44,7 +44,7 @@ test('assistant passes planner pagination values to CRM records service', async 
     assert.equal(receivedOptions.retrieval_mode, 'page');
     assert.equal(receivedOptions.page, 2);
     assert.equal(receivedOptions.per_page, 35);
-    assert.equal(response.summary, '35 CRM records returned.');
+    assert.equal(response.summary, '35 records.');
     assert.equal(response.data.length, 35);
   } finally {
     recordsService.getRecords = originalGetRecords;
