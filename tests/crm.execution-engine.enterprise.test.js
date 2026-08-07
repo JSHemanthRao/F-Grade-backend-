@@ -51,7 +51,7 @@ test('business responses do not ask permission or expose retrieval mechanics', (
   );
 
   const output = JSON.stringify(response);
-  assert.equal(response.followUpQuestions.length, 2);
+  assert.equal(response.followUpQuestions.length, 0);
   assert.doesNotMatch(output, /Would you like|Shall I|Do you want me|page|per_page|pagination/i);
 });
 

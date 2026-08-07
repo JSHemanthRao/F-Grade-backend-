@@ -1,5 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../common/config/env');
-const recordsService = require('../services/records.service');
+const recordsService = require('../services/retrieval-engine.service');
 const { resolveRequestedModule } = require('../validators/crm.validator');
 const { getModuleDefinition } = require('../services/module-definition.service');
 const assistantEngine = require('../services/assistant-engine.service');

@@ -64,3 +64,36 @@ test('CRM-provided cutoff is displayed verbatim and no cutoff is inferred', () =
   assert.doesNotMatch(withoutCutoff.summary, /Data available through|as of|partial/i);
   assert.doesNotMatch(withoutCutoff.summary, forbiddenInferredWording);
 });
+
+test('response exposes the required evidence sections and reports uncovered months', () => {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1));
+  const months = Array.from({ length: 3 }, (_, index) => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1)).toISOString().slice(0, 7));
+  const response = formatResponse(
+    { question: 'Monthly deal values for the last 3 months', timeRange: detectTimeRange('last 3 months'), steps: [], modules: ['deals'], intents: ['COMPARE'] },
+    [{ module: 'deals', result: { data: [
+      { id: 'd1', Amount: 100, Closing_Date: `${months[0]}-10` },
+      { id: 'd2', Amount: 200, Closing_Date: `${months[2]}-10` },
+    ], info: { more_records: true } } }],
+    [{ type: 'sum', label: 'Sum', value: 300 }],
+  );
+
+  assert.deepEqual(Object.keys(response).slice(0, 7), [
+    'success', 'summary', 'retrievedDataCoverage', 'requestedInformation', 'calculatedMetrics', 'businessObservations', 'limitations',
+  ]);
+  assert.deepEqual(response.retrievedDataCoverage.monthsWithData, [months[0], months[2]]);
+  assert.deepEqual(response.retrievedDataCoverage.monthsWithoutRetrievedRecords, [months[1]]);
+  assert.equal(response.retrievedDataCoverage.retrievedDataCoverage.includes('could not be confirmed'), true);
+  assert.equal(response.limitations.some((item) => /entire requested period/.test(item)), true);
+  assert.doesNotMatch(JSON.stringify(response), /retrieved dataset|first page|latest records|pagination|backend|connector|~/i);
+});
+
+test('follow-up questions use fields present in returned CRM records', () => {
+  const response = formatResponse(
+    { question: 'Show deals', timeRange: { label: 'all time', range: 'all_time' }, steps: [], modules: ['deals'], intents: ['LIST'] },
+    [{ module: 'deals', result: { data: [{ id: 'd1', Owner: { name: 'Asha' }, Amount: 500 }], info: { retrievalComplete: true } } }],
+    [],
+  );
+  assert.ok(response.suggestedNextAnalysis.length > 0);
+  assert.doesNotMatch(JSON.stringify(response.suggestedNextAnalysis), /forecast|dashboard|report|analytics|chart/i);
+});

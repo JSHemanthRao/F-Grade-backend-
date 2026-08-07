@@ -5,8 +5,13 @@ function calculateResult(plan, datasets) {
   const calculations = [];
   const getResult = (dataset) => dataset?.result || dataset || {};
   const getRecords = (dataset) => getResult(dataset).data || [];
-  const getAmount = (record) => Number(record.Amount ?? record.amount ?? record.value ?? record.Grand_Total ?? 0) || 0;
-  const countValue = getResult(datasets[0]).count ?? getResult(datasets[0]).info?.count ?? getRecords(datasets[0]).length;
+  const getAmount = (record) => {
+    const raw = record.Amount ?? record.amount ?? record.value ?? record.Grand_Total;
+    if (raw === undefined || raw === null || raw === '') return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  };
+  const countValue = getRecords(datasets[0]).length;
 
   if (DEBUG_ASSISTANT) {
     logger.info('Analytics Engine', {
@@ -19,19 +24,20 @@ function calculateResult(plan, datasets) {
   if (plan.steps.some((step) => step.type === 'count')) {
     const countDatasets = datasets.filter((dataset) => dataset.step?.type === 'count' || plan.steps.length === 1);
     if (countDatasets.length <= 1) {
-      const count = getResult(countDatasets[0] || datasets[0]).count ?? getResult(countDatasets[0] || datasets[0]).info?.count ?? getRecords(countDatasets[0] || datasets[0]).length;
+      const count = getRecords(countDatasets[0] || datasets[0]).length;
       calculations.push({ label: 'Count', value: count, type: 'count' });
     } else {
       const counts = {};
       countDatasets.forEach((dataset) => {
-        counts[dataset.module] = getResult(dataset).count ?? getResult(dataset).info?.count ?? getRecords(dataset).length;
+        counts[dataset.module] = getRecords(dataset).length;
       });
       calculations.push({ label: 'Counts', value: counts, type: 'counts' });
     }
   }
 
   if (plan.steps.some((step) => step.type === 'aggregate')) {
-    const values = datasets.flatMap(getRecords).map(getAmount);
+    const values = datasets.flatMap(getRecords).map(getAmount).filter((value) => value !== null);
+    if (values.length === 0) return calculations;
     const sum = values.reduce((total, value) => total + value, 0);
     calculations.push({ label: 'Sum', value: sum, type: 'sum' });
     if (plan.intents.includes('AGGREGATION') && /average|avg/i.test(plan.question)) {
@@ -57,8 +63,8 @@ function calculateResult(plan, datasets) {
     }, {});
     const comparison = {};
     modules.forEach((module) => {
-      const thisValue = (periods['this month']?.[module] || periods['all time']?.[module] || []).reduce((sum, record) => sum + getAmount(record), 0);
-      const lastValue = (periods['last month']?.[module] || []).reduce((sum, record) => sum + getAmount(record), 0);
+      const thisValue = (periods['this month']?.[module] || periods['all time']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
+      const lastValue = (periods['last month']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
       comparison[module] = { 'this month': thisValue, 'last month': lastValue, difference: thisValue - lastValue };
     });
     if (!hasPeriods && modules.length === 1 && /last\s+\d+\s+months?|last\s+year|\b(?:20\d{2})\b/i.test(plan.question)) {
@@ -68,19 +74,15 @@ function calculateResult(plan, datasets) {
         const parsed = date ? new Date(date) : null;
         if (!parsed || Number.isNaN(parsed.valueOf())) return;
         const month = parsed.toISOString().slice(0, 7);
-        monthlyTotals[month] = (monthlyTotals[month] || 0) + getAmount(record);
+        const amount = getAmount(record);
+        if (amount !== null) monthlyTotals[month] = (monthlyTotals[month] || 0) + amount;
       });
-      const requestedMonthCount = plan.timeRange?.monthCount;
-      if (requestedMonthCount) {
-        const now = new Date();
-        const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - requestedMonthCount, 1));
-        for (let index = 0; index < requestedMonthCount; index += 1) {
-          const month = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1)).toISOString().slice(0, 7);
-          if (!Object.prototype.hasOwnProperty.call(monthlyTotals, month)) monthlyTotals[month] = 0;
-        }
-      }
       const months = Object.keys(monthlyTotals).sort();
-      const growth = months.length > 1 && monthlyTotals[months[months.length - 2]] !== 0
+      const previous = months.at(-2) ? new Date(`${months.at(-2)}-01T00:00:00Z`) : null;
+      const current = months.at(-1) ? new Date(`${months.at(-1)}-01T00:00:00Z`) : null;
+      const consecutive = previous && current
+        && (current.getUTCFullYear() * 12 + current.getUTCMonth()) - (previous.getUTCFullYear() * 12 + previous.getUTCMonth()) === 1;
+      const growth = consecutive && monthlyTotals[months[months.length - 2]] !== 0
         ? (monthlyTotals[months[months.length - 1]] - monthlyTotals[months[months.length - 2]]) / Math.abs(monthlyTotals[months[months.length - 2]])
         : null;
       calculations.push({
@@ -150,8 +152,11 @@ function calculateResult(plan, datasets) {
     });
     if (Object.keys(stages).length > 0) calculations.push({ label: 'Stage distribution', type: 'stage_distribution', value: stages });
     if (plan.report || /pipeline/i.test(plan.question)) {
-      const pipeline = datasets.flatMap(getRecords).filter((record) => !/closed\s+(won|lost)/i.test(record.Stage || '')).reduce((sum, record) => sum + getAmount(record), 0);
-      calculations.push({ label: 'Pipeline', type: 'pipeline', value: pipeline });
+      const pipelineValues = datasets.flatMap(getRecords)
+        .filter((record) => !/closed\s+(won|lost)/i.test(record.Stage || ''))
+        .map(getAmount)
+        .filter((value) => value !== null);
+      if (pipelineValues.length > 0) calculations.push({ label: 'Pipeline', type: 'pipeline', value: pipelineValues.reduce((sum, value) => sum + value, 0) });
     }
   }
 

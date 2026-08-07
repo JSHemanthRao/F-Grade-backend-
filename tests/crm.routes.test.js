@@ -53,12 +53,12 @@ test('CRM router exposes one GET route per requested module', () => {
 });
 
 test('CRM assistant endpoint accepts only a question and routes count requests internally', async () => {
-  const originalGetCount = recordsService.getCount;
+  const originalGetRecords = recordsService.getRecords;
   let receivedOptions;
 
-  recordsService.getCount = async (_moduleName, options) => {
+  recordsService.getRecords = async (_moduleName, options) => {
     receivedOptions = options;
-    return { data: [], info: { count: 12 } };
+    return { data: Array.from({ length: 12 }, (_, index) => ({ id: String(index + 1) })), info: { count: 12, more_records: false } };
   };
 
   const req = {
@@ -85,7 +85,7 @@ test('CRM assistant endpoint accepts only a question and routes count requests i
   await controller.handleAssistantRequest(req, res, () => {});
 
   assert.equal(receivedOptions.question, 'How many leads are there?');
-  assert.equal(receivedOptions.retrieval_mode, 'count');
+  assert.equal(receivedOptions.retrieval_mode, 'all');
   assert.equal(receivedOptions.page, undefined);
   assert.equal(receivedOptions.per_page, undefined);
   assert.equal(res.payload.success, true);
@@ -93,7 +93,7 @@ test('CRM assistant endpoint accepts only a question and routes count requests i
   assert.equal(res.payload.calculations[0].label, 'Count');
   assert.equal(res.payload.calculations[0].value, 12);
 
-  recordsService.getCount = originalGetCount;
+  recordsService.getRecords = originalGetRecords;
 });
 
 test('CRM controller resolves the requested module from the matched route path', async () => {

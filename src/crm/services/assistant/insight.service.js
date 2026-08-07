@@ -24,8 +24,11 @@ function generateInsights(plan, datasets, calculations) {
   });
 
   calculations.filter((calculation) => calculation.type === 'monthly_performance').forEach((calculation) => {
-    if (calculation.value.growth > 0) insights.push({ type: 'increase', message: `The latest month increased by ${(calculation.value.growth * 100).toFixed(2)}% versus the preceding month.` });
-    if (calculation.value.growth < 0) insights.push({ type: 'decrease', message: `The latest month decreased by ${(Math.abs(calculation.value.growth) * 100).toFixed(2)}% versus the preceding month.` });
+    const months = Object.keys(calculation.value.monthlyTotals || {}).sort();
+    const previousMonth = months.at(-2);
+    const currentMonth = months.at(-1);
+    if (previousMonth && currentMonth && calculation.value.growth > 0) insights.push({ type: 'increase', message: `${currentMonth} value increased from ${calculation.value.monthlyTotals[previousMonth]} in ${previousMonth} to ${calculation.value.monthlyTotals[currentMonth]} in ${currentMonth}.` });
+    if (previousMonth && currentMonth && calculation.value.growth < 0) insights.push({ type: 'decrease', message: `${currentMonth} value decreased from ${calculation.value.monthlyTotals[previousMonth]} in ${previousMonth} to ${calculation.value.monthlyTotals[currentMonth]} in ${currentMonth}.` });
   });
 
   return insights;

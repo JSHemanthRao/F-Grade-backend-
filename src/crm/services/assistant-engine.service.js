@@ -1,5 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../common/config/env');
-const recordsService = require('../services/records.service');
+const recordsService = require('../services/retrieval-engine.service');
 const { buildExecutionPlan } = require('./assistant/planner.service');
 const { optimizeExecutionPlan } = require('./assistant/query-optimizer.service');
 const { executePlan } = require('./assistant/execution-engine.service');
@@ -12,22 +12,6 @@ const { detectModule } = require('./assistant/module-detector.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
 const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
 const logger = require('../../common/logging/logger');
-
-async function getConversionFallback(question, plan) {
-  const period = plan.timeRange.label === 'all time' ? 'the requested period' : plan.timeRange.label;
-  const results = await Promise.all(['leads', 'deals'].map(async (module) => {
-    try {
-      const result = await recordsService.getCount(module, { question: `How many ${module} were created ${period}?`, retrieval_mode: 'count' });
-      return { module, count: Number(result?.info?.count ?? 0), available: true };
-    } catch (error) {
-      logger.warn('Fallback', { module, message: 'CRM alternative unavailable' });
-      return { module, count: null, available: false };
-    }
-  }));
-  const leads = results.find((result) => result.module === 'leads');
-  const deals = results.find((result) => result.module === 'deals');
-  return leads?.available && deals?.available ? { period, leadCount: leads.count, dealCount: deals.count } : null;
-}
 
 async function handleAssistantRequest(payload = {}) {
   const question = String(payload?.question || '').trim();
@@ -48,7 +32,7 @@ async function handleAssistantRequest(payload = {}) {
     const needsDealLink = /converted\s+(?:into|to)\s+deals?|became\s+a\s+deal/i.test(question);
     if (!conversionDiscovery.fields.length || (needsDate && !hasDate) || (needsDealLink && !conversionDiscovery.fields.includes('Converted_Deal'))) {
       logFallbackReason(FALLBACK_REASONS.UNSUPPORTED_METRIC);
-      return formatResponse(plan, [], [], { conversionFallback: await getConversionFallback(question, plan) });
+      return formatResponse(plan, [], [], { conversionFallback: true });
     }
   }
 
@@ -58,7 +42,7 @@ async function handleAssistantRequest(payload = {}) {
   } catch (error) {
     logger.error('Assistant Pipeline', { module: moduleCandidates[0], message: 'Execution failed' });
     if (plan.steps.some((step) => step.type === 'conversion_count')) {
-      return formatResponse(plan, [], [], { conversionFallback: await getConversionFallback(question, plan) });
+      return formatResponse(plan, [], [], { conversionFallback: true });
     }
     return { success: false, message: 'The CRM could not provide the requested information at this time.', requestedInformation: question };
   }
@@ -69,9 +53,7 @@ async function handleAssistantRequest(payload = {}) {
   if (!validation.valid && validation.issues.includes('dataset_incomplete')) {
     for (const dataset of merged.datasets.filter((item) => item.result?.info?.more_records === true && !item.step?.explicit)) {
       const options = { question, fields: dataset.step.requiredFieldsByModule?.[dataset.module], retrieval_mode: 'all', force_coql: true };
-      dataset.result = dataset.step.type === 'count'
-        ? await recordsService.getCount(dataset.module, options)
-        : await recordsService.getRecords(dataset.module, options);
+      dataset.result = await recordsService.getRecords(dataset.module, options);
     }
     merged = mergeDatasets(merged.datasets);
     calculations = calculateResult(plan, merged.datasets);
@@ -85,8 +67,7 @@ async function handleAssistantRequest(payload = {}) {
   }
 
   if (plan.steps.some((step) => step.type === 'conversion_count') && calculations.some((item) => item.type === 'conversion_unavailable')) {
-    const fallback = await getConversionFallback(question, plan);
-    return formatResponse(plan, merged.datasets, [], fallback ? { conversionFallback: fallback } : { emptyReason: 'UNSUPPORTED_METRIC' });
+    return formatResponse(plan, merged.datasets, [], { conversionFallback: true });
   }
   return formatResponse(plan, merged.datasets, calculations, { insights: generateInsights(plan, merged.datasets, calculations) });
 }

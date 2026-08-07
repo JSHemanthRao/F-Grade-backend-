@@ -158,13 +158,7 @@ test('assistant engine builds a count plan for simple count questions', async ()
   const originalGetCount = recordsService.getCount;
   const originalGetRecords = recordsService.getRecords;
 
-  recordsService.getCount = async (moduleKey, options) => {
-    assert.equal(moduleKey, 'leads');
-    assert.equal(options.retrieval_mode, 'count');
-    return { data: [], info: { count: 18 } };
-  };
-
-  recordsService.getRecords = async () => ({ data: [], info: {} });
+  recordsService.getRecords = async () => ({ data: Array.from({ length: 18 }, (_, index) => ({ id: `lead-${index}` })), info: {} });
 
   try {
     const response = await assistantEngine.handleAssistantRequest({ question: 'How many leads are there?' });

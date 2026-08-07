@@ -1,5 +1,5 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
-const recordsService = require('../records.service');
+const recordsService = require('../retrieval-engine.service');
 const logger = require('../../../common/logging/logger');
 
 function getPeriods(step, question, contextDatasets) {
@@ -37,7 +37,8 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
           } : {}),
           ...(conversionDiscovery ? { conversion_fields: conversionDiscovery.fields, conversion_metric: step.metric } : {}),
           ...(step.requiredFieldsByModule?.[moduleKey]?.length ? { fields: step.requiredFieldsByModule[moduleKey] } : {}),
-          retrieval_mode: step.type === 'count' ? 'count' : (['aggregate', 'analytics', 'compare', 'conversion_count'].includes(step.type) ? 'all' : (step.type === 'query' && step.explicit ? 'page' : 'auto')),
+          retrievalCache: requestCache,
+          retrieval_mode: ['count', 'aggregate', 'analytics', 'compare', 'conversion_count'].includes(step.type) ? 'all' : (step.type === 'query' && step.explicit ? 'page' : 'auto'),
         };
         const cacheKey = JSON.stringify({ moduleKey, period, type: step.type, options: requestOptions });
         const contextual = contextDatasets.find((dataset) => dataset.cacheKey === cacheKey
@@ -51,9 +52,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
         }
 
         if (DEBUG_ASSISTANT) logger.info('Execution Engine', { module: moduleKey, period, type: step.type });
-        const execute = (options) => step.type === 'count'
-          ? recordsService.getCount(moduleKey, options)
-          : recordsService.getRecords(moduleKey, options);
+        const execute = (options) => recordsService.getRecords(moduleKey, options);
         let result;
         try {
           result = await execute(requestOptions);
@@ -62,7 +61,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
           result = await execute({
             ...requestOptions,
             force_coql: true,
-            retrieval_mode: step.explicit ? requestOptions.retrieval_mode : (step.type === 'count' ? 'count' : 'all'),
+            retrieval_mode: step.explicit ? requestOptions.retrieval_mode : 'all',
           });
         }
         if (result?.info?.more_records === true && !step.explicit) {

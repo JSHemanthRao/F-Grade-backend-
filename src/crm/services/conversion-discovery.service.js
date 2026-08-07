@@ -1,4 +1,4 @@
-const { zohoClient } = require('../../common/config/axios');
+const RetrievalEngine = require('./retrieval-engine.service');
 const { getModuleDefinition } = require('./module-definition.service');
 const logger = require('../../common/logging/logger');
 
@@ -35,10 +35,8 @@ async function discoverLeadConversionFields() {
       module: 'Leads',
       fieldsInspected: CONVERSION_FIELD_CANDIDATES,
     });
-    const response = await zohoClient.get('/crm/v8/settings/fields', { params: { module: 'Leads' } });
-    const rawFields = response.data?.fields || response.data?.data || [];
-    const fields = rawFields.map(normalizeField).filter(isConversionField);
-    logger.info('Conversion Discovery', { fields, fieldCount: rawFields.length });
+    const fields = (await RetrievalEngine.getModuleFields('leads')).map(normalizeField).filter(isConversionField);
+    logger.info('Conversion Discovery', { fields, fieldCount: fields.length });
     return { fields, source: 'zoho_metadata', metadataAvailable: true, error: null };
   } catch (error) {
     logger.warn('Conversion Discovery', {
