@@ -121,7 +121,7 @@ function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
     const field = getDateField(moduleKey, text, conversionFields);
     clauses.push(`${field} >= '${window.start}'`, `${field} < '${window.end}'`);
   }
-  if (criteria && !requestedDateWindow && !/this\s+month|current\s+month|month[-\s]+to[-\s]+date|last\s+month|previous\s+month/i.test(text)) {
+  if (criteria) {
     const translated = String(criteria).replace(
       /\(?([A-Za-z0-9_]+):(equals|greater_equal|greater_than|less_equal|less_than):([^\)]+)\)?/gi,
       (_match, field, operator, rawValue) => {

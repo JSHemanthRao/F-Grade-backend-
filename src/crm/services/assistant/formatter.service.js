@@ -11,6 +11,61 @@ const AVAILABILITY_FIELDS = [
   'data_available_through', 'dataAvailableThrough', 'available_through', 'availableThrough',
   'through_date', 'throughDate', 'cutoff_date', 'cutoffDate', 'as_of_date', 'asOfDate',
 ];
+const CURRENCY_FIELDS = /amount|value|revenue|total|price|pipeline/i;
+
+function numericValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatNumber(value) {
+  const number = numericValue(value);
+  if (number === null) return String(value ?? '');
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 6 }).format(number);
+}
+
+function formatCurrency(value) {
+  const number = numericValue(value);
+  return number === null ? String(value ?? '') : `₹${formatNumber(number)}`;
+}
+
+function formatPercentage(value) {
+  const number = numericValue(value);
+  return number === null ? String(value ?? '') : `${formatNumber(number * 100)}%`;
+}
+
+function formatMetricValue(type, value) {
+  if (type === 'conversion_rate') return formatPercentage(value);
+  if (['sum', 'pipeline', 'average', 'maximum', 'minimum'].includes(type)) return formatCurrency(value);
+  if (type === 'counts' && value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, formatNumber(item)]));
+  }
+  if (type === 'monthly_performance' && value?.monthlyTotals) {
+    return { ...value, monthlyTotals: Object.fromEntries(Object.entries(value.monthlyTotals).map(([key, item]) => [key, formatCurrency(item)])) };
+  }
+  if (type === 'comparison' && value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === 'difference' || key.includes('month') ? formatCurrency(item) : item]));
+  }
+  if (type === 'multi_module_comparison' && value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([module, metrics]) => [module, Object.fromEntries(Object.entries(metrics).map(([key, item]) => [key, formatCurrency(item)]))]));
+  }
+  if (['stage_distribution', 'conversion_by_owner'].includes(type) && value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, formatNumber(item)]));
+  }
+  if (type === 'top_owners' && Array.isArray(value)) {
+    return value.map((item) => ({ ...item, count: formatNumber(item.count) }));
+  }
+  if (typeof value === 'number') return formatNumber(value);
+  return value;
+}
+
+function presentMetrics(calculations) {
+  return calculations.map((calculation) => ({
+    type: calculation.type,
+    label: calculation.label,
+    value: formatMetricValue(calculation.type, calculation.value),
+  }));
+}
 
 function recordsFrom(datasets) {
   const seen = new Set();
@@ -107,18 +162,18 @@ function metricSummary(calculations, dataLength) {
   const count = calculations.find((item) => item.type === 'count');
   const counts = calculations.find((item) => item.type === 'counts');
 
-  if (conversionRate) return `Lead conversion rate: ${(conversionRate.value * 100).toFixed(2)}%.`;
-  if (conversionCount) return `${conversionCount.value} converted leads.`;
-  if (pipeline) return `Pipeline value: ${pipeline.value}.`;
-  if (stageDistribution) return `Stage distribution: ${Object.entries(stageDistribution.value).map(([stage, value]) => `${stage} ${value}`).join(', ')}.`;
-  if (monthly) return `Monthly values: ${Object.entries(monthly.value.monthlyTotals).map(([month, value]) => `${month} ${value}`).join(', ')}.`;
-  if (multi) return `comparison: ${Object.entries(multi.value).map(([module, values]) => `${module}: this month ${values['this month']}, last month ${values['last month']}, difference ${values.difference}`).join('; ')}.`;
-  if (comparison) return `comparison: this month ${comparison.value['this month']}; last month ${comparison.value['last month']}; difference ${comparison.value.difference}.`;
-  if (average) return `Average deal value: ${average.value}.`;
-  if (sum) return `Total value: ${sum.value}.`;
-  if (counts) return `Record counts: ${Object.entries(counts.value).map(([module, value]) => `${module} ${value}`).join(', ')}.`;
-  if (count) return `${count.value} matching ${Number(count.value) === 1 ? 'record' : 'records'}.`;
-  return `${dataLength} ${dataLength === 1 ? 'record' : 'records'}.`;
+  if (conversionRate) return `Lead conversion rate: ${formatPercentage(conversionRate.value)}.`;
+  if (conversionCount) return `${formatNumber(conversionCount.value)} converted leads.`;
+  if (pipeline) return `Pipeline value: ${formatCurrency(pipeline.value)}.`;
+  if (stageDistribution) return `Stage distribution: ${Object.entries(stageDistribution.value).map(([stage, value]) => `${stage} ${formatNumber(value)}`).join(', ')}.`;
+  if (monthly) return `Monthly values: ${Object.entries(monthly.value.monthlyTotals).map(([month, value]) => `${month} ${formatCurrency(value)}`).join(', ')}.`;
+  if (multi) return `comparison: ${Object.entries(multi.value).map(([module, values]) => `${module}: this month ${formatCurrency(values['this month'])}, last month ${formatCurrency(values['last month'])}, difference ${formatCurrency(values.difference)}`).join('; ')}.`;
+  if (comparison) return `comparison: this month ${formatCurrency(comparison.value['this month'])}; last month ${formatCurrency(comparison.value['last month'])}; difference ${formatCurrency(comparison.value.difference)}.`;
+  if (average) return `Average deal value: ${formatCurrency(average.value)}.`;
+  if (sum) return `Total value: ${formatCurrency(sum.value)}.`;
+  if (counts) return `Record counts: ${Object.entries(counts.value).map(([module, value]) => `${module} ${formatNumber(value)}`).join(', ')}.`;
+  if (count) return `${formatNumber(count.value)} matching ${Number(count.value) === 1 ? 'record' : 'records'}.`;
+  return `${formatNumber(dataLength)} ${dataLength === 1 ? 'record' : 'records'}.`;
 }
 
 function ownerName(record) {
@@ -140,12 +195,26 @@ function dataBackedFollowUps(records, coverage) {
 function buildTables(records) {
   if (records.length === 0) return [];
   const columns = [...new Set(records.flatMap((record) => Object.keys(record || {})))]
-    .filter((column) => !column.startsWith('_'))
+    .filter((column) => !column.startsWith('_') && records.some((record) => record[column] !== undefined && record[column] !== null && record[column] !== ''))
     .slice(0, 12);
+  const displayValue = (column, value) => {
+    if (value === undefined || value === null || value === '') return '';
+    if (CURRENCY_FIELDS.test(column) && numericValue(value) !== null) return formatCurrency(value);
+    if (typeof value === 'number') return formatNumber(value);
+    if (typeof value === 'object') return value.name || value.Name || value.full_name || JSON.stringify(value);
+    return String(value).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+  };
+  const rows = records.map((record) => columns.map((column) => displayValue(column, record[column])));
+  const markdown = [
+    `| ${columns.join(' | ')} |`,
+    `| ${columns.map(() => '---').join(' | ')} |`,
+    ...rows.map((row) => `| ${row.join(' | ')} |`),
+  ].join('\n');
   return [{
     title: 'CRM Records',
     columns,
-    rows: records.map((record) => columns.map((column) => record[column] ?? null)),
+    rows,
+    markdown,
   }];
 }
 
@@ -215,7 +284,7 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     calculatedMetrics: calculations,
     businessObservations: observations,
     limitations,
-    keyMetrics: calculations,
+    keyMetrics: presentMetrics(calculations),
     suggestedNextAnalysis: followUps,
     data: records,
     tables: buildTables(records),

@@ -11,7 +11,7 @@ function getPeriods(step, question, contextDatasets) {
     : [null];
 }
 
-async function executePlan({ plan, question, moduleCandidates, context = {}, conversionDiscovery = null }) {
+async function executePlan({ plan, question, moduleCandidates, context = {}, conversionDiscovery = null, filterPlans = {} }) {
   const datasets = [];
   const requestCache = new Map();
   const contextDatasets = Array.isArray(context.datasets) ? context.datasets : [];
@@ -36,6 +36,9 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
             offset: step.offset,
           } : {}),
           ...(conversionDiscovery ? { conversion_fields: conversionDiscovery.fields, conversion_metric: step.metric } : {}),
+          ...(filterPlans[moduleKey] && (period ? filterPlans[moduleKey].serverCriteriaWithoutDate : filterPlans[moduleKey].serverCriteria)
+            ? { criteria: period ? filterPlans[moduleKey].serverCriteriaWithoutDate : filterPlans[moduleKey].serverCriteria }
+            : {}),
           ...(step.requiredFieldsByModule?.[moduleKey]?.length ? { fields: step.requiredFieldsByModule[moduleKey] } : {}),
           retrievalCache: requestCache,
           retrieval_mode: ['count', 'aggregate', 'analytics', 'compare', 'conversion_count'].includes(step.type) ? 'all' : (step.type === 'query' && step.explicit ? 'page' : 'auto'),

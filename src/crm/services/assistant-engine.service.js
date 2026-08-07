@@ -10,6 +10,7 @@ const { generateInsights } = require('./assistant/insight.service');
 const { formatResponse } = require('./assistant/formatter.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
 const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
+const { applyFilterToDataset, buildFilterPlans } = require('./filtering-engine.service');
 const logger = require('../../common/logging/logger');
 
 async function handleAssistantRequest(payload = {}) {
@@ -20,6 +21,16 @@ async function handleAssistantRequest(payload = {}) {
   const plan = optimizeExecutionPlan(buildExecutionPlan(question, context));
   const moduleCandidates = plan.modules;
   if (!moduleCandidates.length) return { success: false, message: 'I could not identify the CRM information needed to answer that question.' };
+  const filterPlans = buildFilterPlans({ question, modules: moduleCandidates, plan, context });
+  if (!filterPlans.valid) {
+    return {
+      success: false,
+      message: 'The requested filter is not valid for the selected CRM module.',
+      error: { code: 'FILTER_VALIDATION_ERROR', details: filterPlans.validationErrors },
+      requestedInformation: question,
+    };
+  }
+  plan.filterPlans = filterPlans.byModule;
 
   if (DEBUG_ASSISTANT) logger.info('Assistant Pipeline', { tasks: plan.steps.length, modules: plan.modules });
 
@@ -37,7 +48,13 @@ async function handleAssistantRequest(payload = {}) {
 
   let datasets;
   try {
-    datasets = await executePlan({ plan, question, moduleCandidates, context, conversionDiscovery });
+    datasets = await executePlan({ plan, question, moduleCandidates, context, conversionDiscovery, filterPlans: filterPlans.byModule });
+    datasets = datasets.map((dataset) => {
+      const filterPlan = filterPlans.byModule[dataset.module];
+      const applied = applyFilterToDataset(dataset, filterPlan);
+      if (!applied.valid) throw new Error('FILTER_VALIDATION_ERROR');
+      return applied.dataset;
+    });
   } catch (error) {
     logger.error('Assistant Pipeline', { module: moduleCandidates[0], message: 'Execution failed' });
     if (plan.steps.some((step) => step.type === 'conversion_count')) {
