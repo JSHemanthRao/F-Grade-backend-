@@ -15,6 +15,7 @@ const MODULE_PATTERNS = {
   'purchase-orders': /\b(purchase order|purchase orders|po)\b/i,
   'sales-orders': /\b(sales order|sales orders)\b/i,
   campaigns: /\b(campaign|campaigns)\b/i,
+  users: /\b(user|users|sales\s+reps?|representatives?)\b/i,
 };
 
 function normalizeQuestion(question = '') {

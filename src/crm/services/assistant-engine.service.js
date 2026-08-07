@@ -8,7 +8,6 @@ const { calculateResult } = require('./assistant/calculator.service');
 const { validateExecution } = require('./assistant/validation.service');
 const { generateInsights } = require('./assistant/insight.service');
 const { formatResponse } = require('./assistant/formatter.service');
-const { detectModule } = require('./assistant/module-detector.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
 const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
 const logger = require('../../common/logging/logger');
@@ -19,7 +18,7 @@ async function handleAssistantRequest(payload = {}) {
 
   const context = payload?.context || payload?.conversationContext || {};
   const plan = optimizeExecutionPlan(buildExecutionPlan(question, context));
-  const moduleCandidates = plan.modules.length > 0 ? plan.modules : (detectModule(question) ? [detectModule(question)] : []);
+  const moduleCandidates = plan.modules;
   if (!moduleCandidates.length) return { success: false, message: 'I could not identify the CRM information needed to answer that question.' };
 
   if (DEBUG_ASSISTANT) logger.info('Assistant Pipeline', { tasks: plan.steps.length, modules: plan.modules });
@@ -72,4 +71,4 @@ async function handleAssistantRequest(payload = {}) {
   return formatResponse(plan, merged.datasets, calculations, { insights: generateInsights(plan, merged.datasets, calculations) });
 }
 
-module.exports = { handleAssistantRequest, detectModule };
+module.exports = { handleAssistantRequest };
