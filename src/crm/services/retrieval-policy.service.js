@@ -53,12 +53,13 @@ const FULL_RETRIEVAL_PATTERNS = [
   /\bwhere\b/,
   /\bwith\b/,
   /\bmatching\b/,
-  /\bthis\s+month\b/,
-  /\blast\s+month\b/,
+  /\b(this|last)\s+month\b/,
   /\blast\s+\d+\s+months?\b/,
   /\blast\s+year\b/,
   /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/,
   /\b(?:between|from)\b.*\b(?:and|to)\b/,
+  /\b(?:search|find|lookup|look\s+for)\b/,
+  /\b(?:above|below|greater\s+than|less\s+than|over|under)\b/,
 ];
 
 const COUNT_INTENT_PATTERNS = [
@@ -275,6 +276,22 @@ function normalizeRetrievalMode(value) {
   return RETRIEVAL_MODES.AUTO;
 }
 
+function getEffectiveRetrievalMode(retrievalPlan, explicitMode) {
+  if (explicitMode) {
+    return normalizeRetrievalMode(explicitMode);
+  }
+
+  if (retrievalPlan.strategy === RETRIEVAL_STRATEGIES.COUNT) {
+    return RETRIEVAL_MODES.COUNT;
+  }
+
+  if (retrievalPlan.strategy === RETRIEVAL_STRATEGIES.FULL_DATASET) {
+    return RETRIEVAL_MODES.ALL;
+  }
+
+  return RETRIEVAL_MODES.PAGE;
+}
+
 function logPageResponseDebug({ moduleKey, page, pageToken, info, recordsFetched }) {
   logger.debug('Retrieval Engine', {
     Module: moduleKey,
@@ -353,7 +370,7 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
         fetchAll: false,
         params: {
           page: requestedPage || 1,
-          per_page: requestedPerPage || requestedLimit || DEFAULT_PER_PAGE,
+          per_page: requestedPerPage || requestedLimit || DEFAULT_LIMITED_PER_PAGE,
         },
         reason: requestedPage ? 'requested_page' : 'requested_per_page',
         retrievalMode,
@@ -641,6 +658,7 @@ module.exports = {
   SINGLE_RECORD_PER_PAGE,
   getRequestText,
   normalizeRetrievalMode,
+  getEffectiveRetrievalMode,
   hasCountIntent,
   hasFullRetrievalIntent,
   inferEqualityCriteria,

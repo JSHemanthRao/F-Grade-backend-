@@ -45,6 +45,74 @@ test('RetrievalEngine fetches and merges every page at 200 records per request',
   }
 });
 
+test('RetrievalEngine uses one page for plain list queries', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+
+  zohoClient.get = async (_url, config) => {
+    requests.push(config.params);
+    return { data: { data: [{ id: 'deal-1' }], info: { more_records: true } } };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', { search: 'Show deals' });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].page, 1);
+    assert.equal(requests[0].per_page, 25);
+    assert.deepEqual(result.data, [{ id: 'deal-1' }]);
+  } finally {
+    restoreZoho(originalGet, zohoClient.post);
+  }
+});
+
+test('RetrievalEngine fetches all pages for search and filter queries', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: 'deal-1' }], info: { more_records: true } },
+    { data: [{ id: 'deal-2' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (_url, config) => {
+    requests.push(config.params);
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', { search: 'Deals above ₹5,00,000' });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map((params) => params.page), [1, 2]);
+    assert.deepEqual(requests.map((params) => params.per_page), [200, 200]);
+    assert.deepEqual(result.data, [{ id: 'deal-1' }, { id: 'deal-2' }]);
+  } finally {
+    restoreZoho(originalGet, zohoClient.post);
+  }
+});
+
+test('RetrievalEngine fetches all pages for date-based queries', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    { data: [{ id: 'deal-1' }], info: { more_records: true } },
+    { data: [{ id: 'deal-2' }], info: { more_records: false } },
+  ];
+
+  zohoClient.get = async (_url, config) => {
+    requests.push(config.params);
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', { search: 'Show deals created in June' });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map((params) => params.page), [1, 2]);
+    assert.deepEqual(requests.map((params) => params.per_page), [200, 200]);
+    assert.deepEqual(result.data, [{ id: 'deal-1' }, { id: 'deal-2' }]);
+  } finally {
+    restoreZoho(originalGet, zohoClient.post);
+  }
+});
+
 test('RetrievalEngine handles 1000+ records and removes duplicate IDs', async () => {
   const originalGet = zohoClient.get;
   let requestCount = 0;

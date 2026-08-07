@@ -11,6 +11,7 @@ const {
   getRequestText,
   hasExplicitPagination,
   normalizeRetrievalMode,
+  getEffectiveRetrievalMode,
   RETRIEVAL_STRATEGIES,
 } = require('./retrieval-policy.service');
 
@@ -522,9 +523,11 @@ async function getRecords(moduleKey, options = {}) {
   };
   const moduleDefinition = getModuleDefinition(normalizedKey);
   const retrievalPlan = getRetrievalPlan(moduleDefinition, options);
+  const effectiveRetrievalMode = getEffectiveRetrievalMode(retrievalPlan, options.retrieval_mode ?? options.retrievalMode);
   const effectiveOptions = {
     ...options,
     ...retrievalPlan.params,
+    retrieval_mode: effectiveRetrievalMode,
   };
   if (!effectiveOptions.criteria && !effectiveOptions.filter && !effectiveOptions.filters) {
     const inferredCriteria = buildCountCriteria(normalizedKey, moduleDefinition, effectiveOptions, getRequestText(effectiveOptions));

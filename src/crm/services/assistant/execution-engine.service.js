@@ -64,11 +64,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
           result = await execute({
             ...requestOptions,
             force_coql: true,
-            retrieval_mode: step.explicit ? requestOptions.retrieval_mode : 'all',
           });
-        }
-        if (result?.info?.more_records === true && !step.explicit) {
-          result = await execute({ ...requestOptions, retrieval_mode: 'all', force_coql: true });
         }
         requestCache.set(cacheKey, result);
         datasets.push({ step, period, module: moduleKey, result });
