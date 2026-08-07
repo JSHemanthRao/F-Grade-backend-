@@ -137,6 +137,18 @@ function dataBackedFollowUps(records, coverage) {
   return questions.slice(0, 2);
 }
 
+function buildTables(records) {
+  if (records.length === 0) return [];
+  const columns = [...new Set(records.flatMap((record) => Object.keys(record || {})))]
+    .filter((column) => !column.startsWith('_'))
+    .slice(0, 12);
+  return [{
+    title: 'CRM Records',
+    columns,
+    rows: records.map((record) => columns.map((column) => record[column] ?? null)),
+  }];
+}
+
 const FACTUAL_OBSERVATION_TYPES = new Set([
   'highest_value',
   'lowest_value',
@@ -203,9 +215,10 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     calculatedMetrics: calculations,
     businessObservations: observations,
     limitations,
+    keyMetrics: calculations,
     suggestedNextAnalysis: followUps,
     data: records,
-    tables: [],
+    tables: buildTables(records),
     calculations,
     insights: observations,
     followUpQuestions: followUps,
