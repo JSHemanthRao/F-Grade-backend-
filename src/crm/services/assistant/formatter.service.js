@@ -243,6 +243,7 @@ function formatResponse(plan, datasets, calculations, options = {}) {
   const conversionUnavailable = Boolean(options.conversionFallback) || calculations.some((calculation) => calculation.type === 'conversion_unavailable');
   const limitations = [];
   if (options.limitation) limitations.push(options.limitation);
+  if (Array.isArray(options.limitations)) limitations.push(...options.limitations);
   if (!coverage.complete && coverage.requestedPeriod !== 'the requested period') limitations.push('Available CRM data does not cover the entire requested period.');
   if (requestedMonths(plan).length > 0 && records.length > 0 && coverage.monthsWithData.length === 0) limitations.push('Available CRM records do not contain a usable date field for month coverage.');
 

@@ -1,168 +1,440 @@
 const { DEBUG_ASSISTANT } = require('../../../common/config/env');
 const logger = require('../../../common/logging/logger');
 
-function calculateResult(plan, datasets) {
-  const calculations = [];
-  const getResult = (dataset) => dataset?.result || dataset || {};
-  const getRecords = (dataset) => getResult(dataset).data || [];
-  const getAmount = (record) => {
-    const raw = record.Amount ?? record.amount ?? record.value ?? record.Grand_Total;
-    if (raw === undefined || raw === null || raw === '') return null;
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : null;
-  };
-  const countValue = getRecords(datasets[0]).length;
+const AMOUNT_FIELDS = ['Amount', 'amount', 'value', 'Grand_Total', 'Revenue', 'Total_Revenue', 'Deal_Value', 'Deal_Amount'];
+const STAGE_FIELDS = ['Stage', 'Status', 'Deal_Stage', 'Stage_Name'];
+const OWNER_FIELDS = ['Owner', 'Owner_Name', 'owner', 'owner_name'];
+const CUSTOMER_FIELDS = ['Account_Name', 'Customer_Name', 'Company', 'account_name', 'customer_name', 'company'];
+const PRODUCT_FIELDS = ['Product_Name', 'Product', 'product_name', 'product'];
+const LEAD_SOURCE_FIELDS = ['Lead_Source', 'LeadSource', 'lead_source'];
+const DATE_FIELDS = ['Closing_Date', 'Created_Time', 'CreatedDate', 'created_time', 'Created_Date', 'Modified_Time', 'CloseDate', 'Close_Date', 'Close_DateTime', 'Date', 'CreatedAt', 'UpdatedAt'];
+const CONVERSION_FIELDS = ['Converted', 'Converted__s', 'Converted_Deal', 'Converted_Date', 'Converted_Time', 'Converted_Date_Time', 'Conversion_Date'];
+const GROWTH_UNAVAILABLE_MESSAGE = 'Growth cannot be calculated because one or more comparison periods are unavailable.';
 
-  if (DEBUG_ASSISTANT) {
-    logger.info('Analytics Engine', {
-      calculationType: 'count',
-      inputValues: datasets.map(getResult),
-      output: countValue,
-    });
+function numericValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function getFirstExistingField(record, fields) {
+  if (!record || typeof record !== 'object') return null;
+  for (const field of fields) {
+    const value = record[field];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+
+function normalizeString(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'object') return value.name || value.Name || value.full_name || value.fullName || value.company || value.Company || null;
+  return null;
+}
+
+function getAmount(record) {
+  return numericValue(getFirstExistingField(record, AMOUNT_FIELDS));
+}
+
+function getStage(record) {
+  return normalizeString(getFirstExistingField(record, STAGE_FIELDS));
+}
+
+function normalizeOwner(record) {
+  return normalizeString(getFirstExistingField(record, OWNER_FIELDS));
+}
+
+function normalizeCustomer(record) {
+  return normalizeString(getFirstExistingField(record, CUSTOMER_FIELDS));
+}
+
+function normalizeProduct(record) {
+  return normalizeString(getFirstExistingField(record, PRODUCT_FIELDS));
+}
+
+function normalizeLeadSource(record) {
+  return normalizeString(getFirstExistingField(record, LEAD_SOURCE_FIELDS));
+}
+
+function getRecordDate(record) {
+  const raw = getFirstExistingField(record, DATE_FIELDS);
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.valueOf()) ? null : date;
+}
+
+function monthKey(date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function quarterKey(date) {
+  return `${date.getUTCFullYear()}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
+}
+
+function yearKey(date) {
+  return String(date.getUTCFullYear());
+}
+
+function isClosedWon(stage) {
+  return typeof stage === 'string' && /closed\s*won|\bwon\b/i.test(stage);
+}
+
+function isClosedLost(stage) {
+  return typeof stage === 'string' && /closed\s*lost|\blost\b/i.test(stage);
+}
+
+function isOpenStage(stage) {
+  return stage && !isClosedWon(stage) && !isClosedLost(stage);
+}
+
+function topRankings(groups, labelField = 'name', valueField = 'count', size = 5) {
+  return Object.entries(groups)
+    .map(([key, value]) => ({ [labelField]: key, [valueField]: value }))
+    .sort((a, b) => Number(b[valueField] ?? 0) - Number(a[valueField] ?? 0))
+    .slice(0, size);
+}
+
+function buildPeriodTotals(records, keyFn) {
+  return records.reduce((acc, record) => {
+    const date = getRecordDate(record);
+    if (!date) return acc;
+    const key = keyFn(date);
+    acc.counts[key] = (acc.counts[key] || 0) + 1;
+    const amount = getAmount(record);
+    if (amount !== null) acc.totals[key] = (acc.totals[key] || 0) + amount;
+    return acc;
+  }, { counts: {}, totals: {} });
+}
+
+function parsePeriodKey(key, periodType) {
+  if (periodType === 'month') {
+    const [year, month] = key.split('-').map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+    return new Date(Date.UTC(year, month - 1, 1));
+  }
+  if (periodType === 'quarter') {
+    const [yearPart, quarterPart] = key.split('-Q');
+    const year = Number(yearPart);
+    const quarter = Number(quarterPart);
+    if (!Number.isFinite(year) || !Number.isFinite(quarter) || quarter < 1 || quarter > 4) return null;
+    return new Date(Date.UTC(year, (quarter - 1) * 3, 1));
+  }
+  if (periodType === 'year') {
+    const year = Number(key);
+    if (!Number.isFinite(year)) return null;
+    return new Date(Date.UTC(year, 0, 1));
+  }
+  return null;
+}
+
+function sortPeriodKeys(keys, periodType) {
+  return keys
+    .map((key) => ({ key, date: parsePeriodKey(key, periodType) }))
+    .filter((entry) => entry.date)
+    .sort((a, b) => a.date - b.date)
+    .map((entry) => entry.key);
+}
+
+function isConsecutivePeriod(periodType, previousKey, currentKey) {
+  const previousDate = parsePeriodKey(previousKey, periodType);
+  const currentDate = parsePeriodKey(currentKey, periodType);
+  if (!previousDate || !currentDate) return false;
+  if (periodType === 'month') {
+    return (currentDate.getUTCFullYear() - previousDate.getUTCFullYear()) * 12
+      + (currentDate.getUTCMonth() - previousDate.getUTCMonth()) === 1;
+  }
+  if (periodType === 'quarter') {
+    return (currentDate.getUTCFullYear() - previousDate.getUTCFullYear()) * 4
+      + (Math.floor(currentDate.getUTCMonth() / 3) - Math.floor(previousDate.getUTCMonth() / 3)) === 1;
+  }
+  if (periodType === 'year') {
+    return currentDate.getUTCFullYear() - previousDate.getUTCFullYear() === 1;
+  }
+  return false;
+}
+
+function calculateGrowth(totals, periodType) {
+  const sortedKeys = sortPeriodKeys(Object.keys(totals), periodType);
+  if (sortedKeys.length < 2) return null;
+  for (let index = sortedKeys.length - 1; index > 0; index -= 1) {
+    const currentKey = sortedKeys[index];
+    const previousKey = sortedKeys[index - 1];
+    if (!isConsecutivePeriod(periodType, previousKey, currentKey)) continue;
+    const previousValue = totals[previousKey] ?? 0;
+    if (previousValue === 0) return null;
+    const currentValue = totals[currentKey] ?? 0;
+    return {
+      previousPeriod: previousKey,
+      currentPeriod: currentKey,
+      previousValue,
+      currentValue,
+      growth: (currentValue - previousValue) / Math.abs(previousValue),
+    };
+  }
+  return null;
+}
+
+function calculateResult(plan, datasets) {
+  const startAt = Date.now();
+  const records = datasets.flatMap((dataset) => (dataset?.result?.data || dataset?.data || []));
+  const calculations = [];
+  const limitations = [];
+  const requestedMetrics = [...new Set((plan.steps || []).map((step) => step.type))];
+
+  const amountValues = records.map(getAmount).filter((value) => value !== null);
+  const stageValues = records.map(getStage).filter(Boolean);
+  const ownerValues = records.map(normalizeOwner).filter(Boolean);
+  const customerValues = records.map(normalizeCustomer).filter(Boolean);
+  const productValues = records.map(normalizeProduct).filter(Boolean);
+  const leadSourceValues = records.map(normalizeLeadSource).filter(Boolean);
+  const datedRecords = records.filter((record) => getRecordDate(record));
+  const hasStageField = records.some((record) => getFirstExistingField(record, STAGE_FIELDS) !== null);
+
+  function addLimitation(metric, reason) {
+    limitations.push({ metric, reason });
   }
 
-  if (plan.steps.some((step) => step.type === 'count')) {
-    const countDatasets = datasets.filter((dataset) => dataset.step?.type === 'count' || plan.steps.length === 1);
+  function countRecords() {
+    const countDatasets = datasets.filter((dataset) => dataset.step?.type === 'count' || (plan.steps || []).length === 1);
     if (countDatasets.length <= 1) {
-      const count = getRecords(countDatasets[0] || datasets[0]).length;
-      calculations.push({ label: 'Count', value: count, type: 'count' });
+      const count = countDatasets.length ? (countDatasets[0]?.result?.data || countDatasets[0]?.data || []).length : records.length;
+      calculations.push({ label: 'Count', type: 'count', value: count });
     } else {
       const counts = {};
       countDatasets.forEach((dataset) => {
-        counts[dataset.module] = getRecords(dataset).length;
+        const module = dataset.module || 'crm';
+        counts[module] = ((dataset.result?.data || dataset.data || []).length);
       });
-      calculations.push({ label: 'Counts', value: counts, type: 'counts' });
+      calculations.push({ label: 'Counts', type: 'counts', value: counts });
     }
   }
 
-  if (plan.steps.some((step) => step.type === 'aggregate')) {
-    const values = datasets.flatMap(getRecords).map(getAmount).filter((value) => value !== null);
-    if (values.length === 0) return calculations;
-    const sum = values.reduce((total, value) => total + value, 0);
-    calculations.push({ label: 'Sum', value: sum, type: 'sum' });
-    if (plan.intents.includes('AGGREGATION') && /average|avg/i.test(plan.question)) {
-      calculations.push({ label: 'Average', value: values.length ? sum / values.length : 0, type: 'average' });
+  function addAggregations() {
+    if (!amountValues.length) {
+      addLimitation('sum', 'Amount fields are missing or invalid.');
+      return;
     }
-    if (/median/i.test(plan.question)) {
-      const sorted = [...values].sort((a, b) => a - b);
-      calculations.push({ label: 'Median', value: sorted.length ? (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.ceil((sorted.length - 1) / 2)]) / 2 : 0, type: 'median' });
-    }
-    if (/maximum|highest|max/i.test(plan.question)) calculations.push({ label: 'Maximum', value: values.length ? Math.max(...values) : 0, type: 'maximum' });
-    if (/minimum|lowest|min/i.test(plan.question)) calculations.push({ label: 'Minimum', value: values.length ? Math.min(...values) : 0, type: 'minimum' });
+    const sum = amountValues.reduce((total, value) => total + value, 0);
+    calculations.push({ label: 'Sum', type: 'sum', value: sum });
+    calculations.push({ label: 'Average', type: 'average', value: sum / amountValues.length });
+    calculations.push({ label: 'Minimum', type: 'minimum', value: Math.min(...amountValues) });
+    calculations.push({ label: 'Maximum', type: 'maximum', value: Math.max(...amountValues) });
+    calculations.push({ label: 'Total revenue', type: 'total_revenue', value: sum });
   }
 
-  if (plan.steps.some((step) => step.type === 'compare')) {
-    const modules = [...new Set(datasets.map((dataset) => dataset.module).filter(Boolean))];
-    const hasPeriods = datasets.some((dataset) => dataset.period);
-    const periods = datasets.reduce((result, dataset) => {
+  function addComparison() {
+    const periodDatasets = datasets.filter((dataset) => dataset.period);
+    if (!periodDatasets.length) {
+      addLimitation('comparison', 'Comparison periods are unavailable.');
+      return;
+    }
+    const periods = periodDatasets.reduce((acc, dataset) => {
       const period = dataset.period || 'all time';
       const module = dataset.module || 'crm';
-      if (!result[period]) result[period] = {};
-      result[period][module] = getRecords(dataset);
-      return result;
+      acc[period] = acc[period] || {};
+      acc[period][module] = dataset.result?.data || dataset.data || [];
+      return acc;
     }, {});
-    const comparison = {};
-    modules.forEach((module) => {
-      const thisValue = (periods['this month']?.[module] || periods['all time']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
+    const modules = [...new Set(periodDatasets.map((dataset) => dataset.module).filter(Boolean))];
+    if (modules.length > 1) {
+      const comparison = {};
+      modules.forEach((module) => {
+        const thisValue = (periods['this month']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
+        const lastValue = (periods['last month']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
+        comparison[module] = { 'this month': thisValue, 'last month': lastValue, difference: thisValue - lastValue };
+      });
+      calculations.push({ label: 'Multi-module comparison', type: 'multi_module_comparison', value: comparison });
+    } else {
+      const module = modules[0] || 'crm';
+      const thisValue = (periods['this month']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
       const lastValue = (periods['last month']?.[module] || []).reduce((sum, record) => sum + (getAmount(record) ?? 0), 0);
-      comparison[module] = { 'this month': thisValue, 'last month': lastValue, difference: thisValue - lastValue };
-    });
-    if (!hasPeriods && modules.length === 1 && /last\s+\d+\s+months?|last\s+year|\b(?:20\d{2})\b/i.test(plan.question)) {
-      const monthlyTotals = {};
-      (periods['all time']?.[modules[0]] || []).forEach((record) => {
-        const date = record.Closing_Date || record.Created_Time || record.CreatedDate || record.created_time;
-        const parsed = date ? new Date(date) : null;
-        if (!parsed || Number.isNaN(parsed.valueOf())) return;
-        const month = parsed.toISOString().slice(0, 7);
-        const amount = getAmount(record);
-        if (amount !== null) monthlyTotals[month] = (monthlyTotals[month] || 0) + amount;
-      });
-      const months = Object.keys(monthlyTotals).sort();
-      const previous = months.at(-2) ? new Date(`${months.at(-2)}-01T00:00:00Z`) : null;
-      const current = months.at(-1) ? new Date(`${months.at(-1)}-01T00:00:00Z`) : null;
-      const consecutive = previous && current
-        && (current.getUTCFullYear() * 12 + current.getUTCMonth()) - (previous.getUTCFullYear() * 12 + previous.getUTCMonth()) === 1;
-      const growth = consecutive && monthlyTotals[months[months.length - 2]] !== 0
-        ? (monthlyTotals[months[months.length - 1]] - monthlyTotals[months[months.length - 2]]) / Math.abs(monthlyTotals[months[months.length - 2]])
-        : null;
-      calculations.push({
-        label: 'Monthly performance',
-        type: 'monthly_performance',
-        value: {
-          monthlyTotals,
-          growth,
-          historicalMonthsComplete: plan.timeRange?.historicalOnly === true,
-          includesCurrentMonth: plan.timeRange?.includesCurrentMonth === true,
-        },
-      });
-    } else if (modules.length <= 1) {
-      const value = comparison[modules[0]] || { 'this month': 0, 'last month': 0, difference: 0 };
-      calculations.push({ label: 'Comparison', type: 'comparison', value });
-    } else {
-      calculations.push({ label: 'CRM comparison', type: 'multi_module_comparison', value: comparison });
+      calculations.push({ label: 'Comparison', type: 'comparison', value: { 'this month': thisValue, 'last month': lastValue, difference: thisValue - lastValue } });
     }
   }
 
-  if (plan.steps.some((step) => step.type === 'conversion_count')) {
-    const records = datasets.flatMap(getRecords);
-    if (records.length === 0) {
-      return calculations;
-    }
-    const conversionFields = ['Converted', 'Converted__s', 'Converted_Deal', 'Converted_Date', 'Converted_Time', 'Converted_Date_Time', 'Conversion_Date'];
-    const hasConversionData = records.some((record) => conversionFields.some((field) => Object.prototype.hasOwnProperty.call(record, field)));
-    if (!hasConversionData) {
+  function addConversionMetrics() {
+    const hasConversion = records.some((record) => CONVERSION_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(record, field)));
+    if (!hasConversion) {
       calculations.push({ label: 'Conversion data unavailable', type: 'conversion_unavailable', value: true });
+      addLimitation('conversion_rate', 'Conversion fields were not available in the CRM records.');
+      return;
+    }
+    const converted = records.filter((record) => (
+      record.Converted__s === true
+      || String(record.Converted__s).toLowerCase() === 'true'
+      || record.Converted_Deal
+      || record.Converted_Date_Time
+      || record.Converted_Time
+      || record.Conversion_Date
+    ));
+    calculations.push({ label: 'Conversion count', type: 'conversion_count', value: converted.length });
+    const conversionStep = (plan.steps || []).find((step) => step.type === 'conversion_count');
+    if (conversionStep?.metric === 'rate') {
+      calculations.push({ label: 'Conversion rate', type: 'conversion_rate', value: records.length ? converted.length / records.length : 0 });
+    }
+  }
+
+  function addAnalyticsMetrics() {
+    if (ownerValues.length) {
+      const ownerGroups = ownerValues.reduce((acc, owner) => {
+        acc[owner] = (acc[owner] || 0) + 1;
+        return acc;
+      }, {});
+      calculations.push({ label: 'Owner distribution', type: 'owner_distribution', value: ownerGroups });
+      calculations.push({ label: 'Top owners', type: 'top_owners', value: topRankings(ownerGroups, 'owner', 'count', 5) });
+      calculations.push({ label: 'Top sales representatives', type: 'top_sales_representatives', value: topRankings(ownerGroups, 'owner', 'count', 5) });
     } else {
-      const converted = records.filter((record) => (
-        record.Converted__s === true
-        || String(record.Converted__s).toLowerCase() === 'true'
-        || record.Converted_Deal
-        || record.Converted_Date_Time
-        || record.Converted_Time
-        || record.Conversion_Date
-      ));
-      calculations.push({ label: 'Conversions', type: 'conversion_count', value: converted.length });
-      const conversionStep = plan.steps.find((step) => step.type === 'conversion_count');
-      if (conversionStep?.metric === 'rate') {
-        calculations.push({ label: 'Conversion rate', type: 'conversion_rate', value: records.length ? converted.length / records.length : 0 });
+      addLimitation('owner_distribution', 'Owner information is not available in the CRM records.');
+    }
+
+    if (stageValues.length) {
+      const stageGroups = stageValues.reduce((acc, stage) => {
+        acc[stage] = (acc[stage] || 0) + 1;
+        return acc;
+      }, {});
+      calculations.push({ label: 'Stage distribution', type: 'stage_distribution', value: stageGroups });
+      calculations.push({ label: 'Top stages', type: 'top_stages', value: topRankings(stageGroups, 'stage', 'count', 5) });
+    } else {
+      addLimitation('stage_distribution', 'Stage information is not available in the CRM records.');
+    }
+
+    if (customerValues.length) {
+      const customerGroups = {};
+      const customerAmounts = {};
+      records.forEach((record) => {
+        const customer = normalizeCustomer(record);
+        if (!customer) return;
+        customerGroups[customer] = (customerGroups[customer] || 0) + 1;
+        const amount = getAmount(record);
+        if (amount !== null) customerAmounts[customer] = (customerAmounts[customer] || 0) + amount;
+      });
+      calculations.push({ label: 'Customer ranking', type: 'customer_ranking', value: topRankings(customerGroups, 'customer', 'count', 5).map((entry) => ({ ...entry, totalAmount: customerAmounts[entry.customer] ?? 0 })) });
+      calculations.push({ label: 'Top customers', type: 'top_customers', value: topRankings(customerGroups, 'customer', 'count', 5) });
+    } else {
+      addLimitation('customer_ranking', 'Customer information is not available in the CRM records.');
+    }
+
+    if (productValues.length) {
+      const productGroups = {};
+      const productAmounts = {};
+      records.forEach((record) => {
+        const product = normalizeProduct(record);
+        if (!product) return;
+        productGroups[product] = (productGroups[product] || 0) + 1;
+        const amount = getAmount(record);
+        if (amount !== null) productAmounts[product] = (productAmounts[product] || 0) + amount;
+      });
+      calculations.push({ label: 'Product ranking', type: 'product_ranking', value: topRankings(productGroups, 'product', 'count', 5).map((entry) => ({ ...entry, totalAmount: productAmounts[entry.product] ?? 0 })) });
+      calculations.push({ label: 'Top products', type: 'top_products', value: topRankings(productGroups, 'product', 'count', 5) });
+    } else {
+      addLimitation('product_ranking', 'Product information is not available in the CRM records.');
+    }
+
+    if (leadSourceValues.length) {
+      const sourceGroups = leadSourceValues.reduce((acc, source) => {
+        acc[source] = (acc[source] || 0) + 1;
+        return acc;
+      }, {});
+      calculations.push({ label: 'Lead source distribution', type: 'lead_source_distribution', value: sourceGroups });
+      calculations.push({ label: 'Top lead sources', type: 'top_lead_sources', value: topRankings(sourceGroups, 'leadSource', 'count', 5) });
+    } else {
+      addLimitation('lead_source_distribution', 'Lead source information is not available in the CRM records.');
+    }
+
+    if (hasStageField) {
+      const closedWonValue = records.filter((record) => isClosedWon(getStage(record))).map(getAmount).filter((value) => value !== null).reduce((total, value) => total + value, 0);
+      const closedLostCount = records.filter((record) => isClosedLost(getStage(record))).length;
+      const closedWonCount = records.filter((record) => isClosedWon(getStage(record))).length;
+      calculations.push({ label: 'Closed won value', type: 'closed_won_value', value: closedWonValue });
+      calculations.push({ label: 'Closed lost count', type: 'closed_lost_count', value: closedLostCount });
+      const openPipelineAmounts = records.filter((record) => isOpenStage(getStage(record))).map(getAmount).filter((value) => value !== null);
+      if (openPipelineAmounts.length) {
+        calculations.push({ label: 'Pipeline value', type: 'pipeline_value', value: openPipelineAmounts.reduce((total, value) => total + value, 0) });
+      } else {
+        addLimitation('pipeline_value', 'Open deal amounts are unavailable for pipeline calculation.');
       }
-      if (/owner|by\s+owner/i.test(plan.question)) {
-        const owners = {};
-        converted.forEach((record) => {
-          const owner = record.Owner?.name || record.Owner?.Name || record.Owner_Name || record.owner || 'Unassigned';
-          owners[owner] = (owners[owner] || 0) + 1;
-        });
-        calculations.push({ label: 'Converted leads by owner', type: 'conversion_by_owner', value: owners });
+      if (closedWonCount > 0 && closedLostCount > 0) {
+        calculations.push({ label: 'Win rate', type: 'win_rate', value: closedWonCount / (closedWonCount + closedLostCount) });
+      } else {
+        addLimitation('win_rate', 'Win rate cannot be calculated because closed won or closed lost counts are unavailable.');
       }
+    } else {
+      addLimitation('closed_won_value', 'Stage information is not available in the CRM records.');
+      addLimitation('closed_lost_count', 'Stage information is not available in the CRM records.');
+      addLimitation('pipeline_value', 'Stage information is not available in the CRM records.');
+      addLimitation('win_rate', 'Stage information is not available in the CRM records.');
     }
   }
 
-  if (plan.intents.includes('ANALYTICS') || plan.report) {
-    const owners = {};
-    datasets.flatMap(getRecords).forEach((record) => {
-      const owner = record.Owner?.name || record.Owner?.Name || record.Owner_Name || record.owner || 'Unassigned';
-      owners[owner] = (owners[owner] || 0) + 1;
-    });
-    calculations.push({ label: 'Top owners', type: 'top_owners', value: Object.entries(owners)
-      .sort((a, b) => b[1] - a[1]).slice(0, 5).map(([owner, count]) => ({ owner, count })) });
-    const stages = {};
-    datasets.flatMap(getRecords).forEach((record) => {
-      const stage = record.Stage || record.Status;
-      if (stage) stages[stage] = (stages[stage] || 0) + 1;
-    });
-    if (Object.keys(stages).length > 0) calculations.push({ label: 'Stage distribution', type: 'stage_distribution', value: stages });
-    if (plan.report || /pipeline/i.test(plan.question)) {
-      const pipelineValues = datasets.flatMap(getRecords)
-        .filter((record) => !/closed\s+(won|lost)/i.test(record.Stage || ''))
-        .map(getAmount)
-        .filter((value) => value !== null);
-      if (pipelineValues.length > 0) calculations.push({ label: 'Pipeline', type: 'pipeline', value: pipelineValues.reduce((sum, value) => sum + value, 0) });
+  function addPeriodMetrics() {
+    if (!datedRecords.length) {
+      addLimitation('month_wise_metrics', 'Date fields are not available in the CRM records.');
+      addLimitation('quarter_wise_metrics', 'Date fields are not available in the CRM records.');
+      addLimitation('year_wise_metrics', 'Date fields are not available in the CRM records.');
+      addLimitation('month_over_month_growth', GROWTH_UNAVAILABLE_MESSAGE);
+      addLimitation('quarter_over_quarter_growth', GROWTH_UNAVAILABLE_MESSAGE);
+      addLimitation('year_over_year_growth', GROWTH_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
+    const monthly = buildPeriodTotals(datedRecords, monthKey);
+    const quarterly = buildPeriodTotals(datedRecords, quarterKey);
+    const yearly = buildPeriodTotals(datedRecords, yearKey);
+
+    calculations.push({ label: 'Month-wise metrics', type: 'month_wise_metrics', value: { monthlyTotals: monthly.totals, monthlyCounts: monthly.counts } });
+    calculations.push({ label: 'Quarter-wise metrics', type: 'quarter_wise_metrics', value: { quarterlyTotals: quarterly.totals, quarterlyCounts: quarterly.counts } });
+    calculations.push({ label: 'Year-wise metrics', type: 'year_wise_metrics', value: { yearlyTotals: yearly.totals, yearlyCounts: yearly.counts } });
+
+    const monthGrowth = calculateGrowth(monthly.totals, 'month');
+    if (monthGrowth) {
+      calculations.push({ label: 'Month-over-month growth', type: 'month_over_month_growth', value: monthGrowth });
+    } else {
+      addLimitation('month_over_month_growth', GROWTH_UNAVAILABLE_MESSAGE);
+    }
+
+    const quarterGrowth = calculateGrowth(quarterly.totals, 'quarter');
+    if (quarterGrowth) {
+      calculations.push({ label: 'Quarter-over-quarter growth', type: 'quarter_over_quarter_growth', value: quarterGrowth });
+    } else {
+      addLimitation('quarter_over_quarter_growth', GROWTH_UNAVAILABLE_MESSAGE);
+    }
+
+    const yearGrowth = calculateGrowth(yearly.totals, 'year');
+    if (yearGrowth) {
+      calculations.push({ label: 'Year-over-year growth', type: 'year_over_year_growth', value: yearGrowth });
+    } else {
+      addLimitation('year_over_year_growth', GROWTH_UNAVAILABLE_MESSAGE);
     }
   }
 
-  if (DEBUG_ASSISTANT) logger.info('Analytics Engine', { calculations });
+  if ((plan.steps || []).some((step) => step.type === 'count')) {
+    countRecords();
+  }
+  if ((plan.steps || []).some((step) => step.type === 'aggregate')) {
+    addAggregations();
+  }
+  if ((plan.steps || []).some((step) => step.type === 'compare')) {
+    addComparison();
+  }
+  if ((plan.steps || []).some((step) => step.type === 'conversion_count')) {
+    addConversionMetrics();
+  }
+  if ((plan.steps || []).some((step) => step.type === 'analytics') || plan.report) {
+    addAnalyticsMetrics();
+    addPeriodMetrics();
+  }
 
-  return calculations;
+  if (DEBUG_ASSISTANT) {
+    logger.info('Analytics Engine', {
+      metricsRequested: requestedMetrics,
+      metricsCalculated: calculations.map((calculation) => calculation.type),
+      metricsSkipped: limitations,
+      executionTimeMs: Date.now() - startAt,
+      validationFailures: limitations,
+    });
+  }
+
+  return { calculations, limitations };
 }
 
 module.exports = {

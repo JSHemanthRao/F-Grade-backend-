@@ -5,7 +5,7 @@ const { optimizeExecutionPlan } = require('./assistant/query-optimizer.service')
 const { executePlan } = require('./assistant/execution-engine.service');
 const { mergeDatasets } = require('./assistant/merge-engine.service');
 const { calculateResult } = require('./assistant/calculator.service');
-const { validateExecution } = require('./assistant/validation.service');
+const { validateExecution, validateResponse } = require('./assistant/validation.service');
 const { generateInsights } = require('./assistant/insight.service');
 const { formatResponse } = require('./assistant/formatter.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
@@ -64,28 +64,42 @@ async function handleAssistantRequest(payload = {}) {
   }
 
   let merged = mergeDatasets(datasets);
-  let calculations = calculateResult(plan, merged.datasets);
-  let validation = validateExecution({ plan, question, datasets: merged.datasets, calculations });
+  let { calculations, limitations } = calculateResult(plan, merged.datasets);
+  let validation = validateExecution({ plan, question, datasets: merged.datasets, calculations, limitations });
   if (!validation.valid && validation.issues.includes('dataset_incomplete')) {
     for (const dataset of merged.datasets.filter((item) => item.result?.info?.more_records === true && !item.step?.explicit)) {
       const options = { question, fields: dataset.step.requiredFieldsByModule?.[dataset.module], retrieval_mode: 'all', force_coql: true };
       dataset.result = await recordsService.getRecords(dataset.module, options);
     }
     merged = mergeDatasets(merged.datasets);
-    calculations = calculateResult(plan, merged.datasets);
-    validation = validateExecution({ plan, question, datasets: merged.datasets, calculations });
+    ({ calculations, limitations } = calculateResult(plan, merged.datasets));
+    validation = validateExecution({ plan, question, datasets: merged.datasets, calculations, limitations });
   }
   if (!validation.valid) {
-    return formatResponse(plan, merged.datasets, [], {
+    return formatResponse(plan, merged.datasets, calculations, {
       closestAnswer: 'The CRM did not provide enough data to complete this analysis.',
       limitation: 'The requested analysis could not be completed from the available CRM data.',
+      limitations,
     });
   }
 
   if (plan.steps.some((step) => step.type === 'conversion_count') && calculations.some((item) => item.type === 'conversion_unavailable')) {
     return formatResponse(plan, merged.datasets, [], { conversionFallback: true });
   }
-  return formatResponse(plan, merged.datasets, calculations, { insights: generateInsights(plan, merged.datasets, calculations) });
+
+  const response = formatResponse(plan, merged.datasets, calculations, { insights: generateInsights(plan, merged.datasets, calculations), limitations });
+  const validationResult = validateResponse({ response, plan, datasets: merged.datasets, calculations, limitations });
+  if (!validationResult.valid) {
+    if (DEBUG_ASSISTANT) logger.warn('Response Validation', { issues: validationResult.issues, warnings: validationResult.warnings });
+    return formatResponse(plan, merged.datasets, [], {
+      closestAnswer: 'The CRM did not provide a validated response for this request.',
+      limitation: 'The generated response could not be fully validated against the CRM data.',
+      limitations: [{ metric: 'response_validation', reason: 'Response content failed validation checks.' }],
+      conversionFallback: plan.steps.some((step) => step.type === 'conversion_count'),
+    });
+  }
+  if (DEBUG_ASSISTANT) logger.info('Response Validation', { issues: validationResult.issues, warnings: validationResult.warnings });
+  return response;
 }
 
 module.exports = { handleAssistantRequest };
