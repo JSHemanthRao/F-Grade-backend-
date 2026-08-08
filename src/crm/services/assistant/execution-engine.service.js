@@ -41,6 +41,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
           requestedFilters: filterPlan.requestedFilters,
           ...(step.requiredFieldsByModule?.[moduleKey]?.length ? { fields: step.requiredFieldsByModule[moduleKey] } : {}),
           retrievalCache: requestCache,
+          ...(filterPlan.serverCriteria ? { force_coql: true } : {}),
           retrieval_mode: 'all',
         };
         const cacheKey = JSON.stringify({ moduleKey, period, type: step.type, options: requestOptions });

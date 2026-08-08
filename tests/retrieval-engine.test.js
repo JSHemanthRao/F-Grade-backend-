@@ -280,6 +280,47 @@ test('RetrievalEngine preserves COQL pagination metadata across complete batches
   }
 });
 
+test('RetrievalEngine uses one targeted COQL batch for complete filtered retrieval', async () => {
+  const originalGet = zohoClient.get;
+  const originalPost = zohoClient.post;
+  const queries = [];
+  zohoClient.get = async () => {
+    throw new Error('complete filtered retrieval should not use Search pagination');
+  };
+  zohoClient.post = async (_url, body) => {
+    queries.push(body.select_query);
+    return {
+      data: {
+        data: [{
+          id: 'deal-june-1',
+          Deal_Name: 'June deal',
+          Stage: 'Closed Won',
+          Closing_Date: '2026-06-15T00:00:00Z',
+        }],
+        info: { more_records: false },
+      },
+    };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', {
+      question: 'Give me Closed Won deals in June 2026',
+      criteria: '(Stage:equals:Closed Won)and(Closing_Date:greater_equal:2026-06-01T00:00:00Z)and(Closing_Date:less_than:2026-07-01T00:00:00Z)',
+      fields: ['Deal_Name', 'Stage', 'Closing_Date'],
+      retrieval_mode: 'all',
+    });
+
+    assert.equal(queries.length, 1);
+    assert.match(queries[0], /Stage = 'Closed Won'/i);
+    assert.match(queries[0], /Closing_Date >= '2026-06-01T00:00:00Z'/i);
+    assert.match(queries[0], /Closing_Date < '2026-07-01T00:00:00Z'/i);
+    assert.match(queries[0], /select Deal_Name, Stage, Closing_Date, id/i);
+    assert.equal(result.data.length, 1);
+  } finally {
+    restoreZoho(originalGet, originalPost);
+  }
+});
+
 test('RetrievalEngine supports empty datasets without fabricating records', async () => {
   const originalGet = zohoClient.get;
   zohoClient.get = async () => ({ data: { data: [], info: { more_records: false } } });

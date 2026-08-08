@@ -79,6 +79,7 @@ function buildCommonOptions(req) {
     message: requestSource?.message,
     sort_by: requestSource?.sort_by,
     sort_order: requestSource?.sort_order,
+    force_coql: !hasExplicitApiPage && Boolean(requestSource?.criteria || requestSource?.filter || requestSource?.filters),
     retrieval_mode: retrievalMode,
   };
 }

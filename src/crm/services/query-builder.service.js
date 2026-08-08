@@ -14,10 +14,13 @@ function getRequestText(options = {}) {
 function shouldUseCoql(options = {}) {
   const requestText = getRequestText(options);
   const criteria = normalizeText(options.criteria || options.filter || options.filters);
+  const completeRetrieval = String(options.retrieval_mode || options.retrievalMode || '').toLowerCase() === 'all';
   // Criteria-bearing list requests must stay on the Search API so the
-  // retrieval engine can walk every Zoho page. COQL remains available for
-  // unstructured date queries, analytics, and explicit fallback requests.
+  // retrieval engine can walk every Zoho page. Complete filtered requests
+  // use COQL instead: Zoho permits a 2,000-row batch there, which preserves
+  // complete-search semantics while avoiding dozens of 200-row calls.
   return Boolean(options.force_coql || ANALYTICS_WORDS.test(requestText)
+    || (completeRetrieval && Boolean(criteria))
     || (DATE_WORDS.test(requestText) && !criteria));
 }
 
@@ -147,7 +150,11 @@ function buildQueryPlan(moduleKey, options = {}) {
   const conversionFields = options.conversion_fields || (/conver|qualified|became\s+a\s+deal/i.test(requestText)
     ? ['Converted_Date_Time', 'Converted__s', 'Converted_Deal']
     : []);
-  const fields = Array.from(new Set([...(moduleDefinition.defaultFields || []), ...conversionFields, 'id']));
+  const requestedFields = Array.isArray(options.fields)
+    ? options.fields
+    : String(options.fields || '').split(',').map((field) => field.trim()).filter(Boolean);
+  const baseFields = requestedFields.length > 0 ? requestedFields : (moduleDefinition.defaultFields || []);
+  const fields = Array.from(new Set([...baseFields, ...conversionFields, 'id']));
   const whereClause = buildWhereClause(moduleKey, requestText, options.criteria || options.filter || options.filters, options);
   const selectExpression = fields.join(', ');
   const query = `select ${selectExpression} from ${moduleDefinition.endpoint}${whereClause ? ` where ${whereClause}` : ''}`;

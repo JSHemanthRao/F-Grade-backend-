@@ -251,6 +251,21 @@ function logCountComplete(moduleKey, count) {
   });
 }
 
+function logRetrievalTelemetry({ moduleKey, criteria, fields, calls, recordsPerCall, totalMatchingRecords, startedAt }) {
+  if (!DEBUG_ASSISTANT) return;
+  const perCall = Array.isArray(recordsPerCall) ? recordsPerCall : [];
+  logger.info('CRM Retrieval Telemetry', {
+    module: moduleKey,
+    crmCalls: calls,
+    criteria: criteria || null,
+    fields,
+    recordsReturnedPerCall: perCall,
+    totalRecordsExamined: perCall.reduce((total, count) => total + count, 0),
+    totalMatchingRecords,
+    executionTimeMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+  });
+}
+
 function normalizeCriteriaValue(criteriaValue) {
   if (criteriaValue === undefined || criteriaValue === null || criteriaValue === '') {
     return null;
@@ -418,6 +433,7 @@ async function executeCoqlRecords(moduleKey, queryPlan, options = {}) {
   const seenIds = new Set();
   let offset = firstOffset;
   let pagesFetched = 0;
+  const recordsPerCall = [];
   let lastInfo = {};
 
   while (true) {
@@ -428,6 +444,7 @@ async function executeCoqlRecords(moduleKey, queryPlan, options = {}) {
     const pageData = Array.isArray(response.data?.data) ? response.data.data : [];
     lastInfo = response.data?.info || {};
     pagesFetched += 1;
+    recordsPerCall.push(pageData.length);
     pageData.forEach((record) => {
       const id = record?.id ?? record?.ID;
       if (id === undefined || id === null || !seenIds.has(String(id))) {
@@ -457,6 +474,7 @@ async function executeCoqlRecords(moduleKey, queryPlan, options = {}) {
       more_records: false,
       retrievalComplete: true,
       pagesFetched,
+      recordsPerCall,
     },
   };
 }
@@ -526,6 +544,7 @@ function logPlannerDebug(moduleKey, options, retrievalPlan, moduleDefinition) {
 }
 
 async function getRecords(moduleKey, options = {}) {
+  const retrievalStartedAt = process.hrtime.bigint();
   const normalizedKey = normalizeModuleKey(moduleKey);
   const retrievalCache = getRetrievalCache(options);
   const cacheKey = retrievalCache ? buildCacheKey(normalizedKey, options) : null;
@@ -546,7 +565,13 @@ async function getRecords(moduleKey, options = {}) {
     const inferredCriteria = buildCountCriteria(normalizedKey, moduleDefinition, effectiveOptions, getRequestText(effectiveOptions));
     if (inferredCriteria) effectiveOptions.criteria = inferredCriteria;
   }
-  const queryPlan = buildQueryPlan(normalizedKey, effectiveOptions);
+  const queryPlan = buildQueryPlan(normalizedKey, {
+    ...effectiveOptions,
+    // Preserve the caller's mode for query selection. The retrieval policy
+    // may upgrade auto -> all internally, but that must not unexpectedly
+    // switch every direct Search request to COQL.
+    retrieval_mode: options.retrieval_mode ?? options.retrievalMode,
+  });
   const {
     page,
     per_page,
@@ -565,9 +590,29 @@ async function getRecords(moduleKey, options = {}) {
   if (retrievalPlan.strategy === RETRIEVAL_STRATEGIES.COUNT) {
     try {
       if (queryPlan.mode === 'coql') {
-        return cacheResult(await executeCoqlCount(normalizedKey, moduleDefinition, queryPlan));
+        const result = await executeCoqlCount(normalizedKey, moduleDefinition, queryPlan);
+        logRetrievalTelemetry({
+          moduleKey: normalizedKey,
+          criteria: effectiveOptions.criteria,
+          fields: queryPlan.fields,
+          calls: 1,
+          recordsPerCall: [result.info.count],
+          totalMatchingRecords: result.info.count,
+          startedAt: retrievalStartedAt,
+        });
+        return cacheResult(result);
       }
-      return cacheResult(await executeCountRequest(normalizedKey, moduleDefinition, options));
+      const result = await executeCountRequest(normalizedKey, moduleDefinition, options);
+      logRetrievalTelemetry({
+        moduleKey: normalizedKey,
+        criteria: effectiveOptions.criteria,
+        fields: [],
+        calls: 1,
+        recordsPerCall: [result.info.count],
+        totalMatchingRecords: result.info.count,
+        startedAt: retrievalStartedAt,
+      });
+      return cacheResult(result);
     } catch (error) {
       logRequestError(
         error,
@@ -583,6 +628,15 @@ async function getRecords(moduleKey, options = {}) {
   if (queryPlan.mode === 'coql') {
     try {
       const coqlResult = await executeCoqlRecords(normalizedKey, queryPlan, effectiveOptions);
+      logRetrievalTelemetry({
+        moduleKey: normalizedKey,
+        criteria: effectiveOptions.criteria,
+        fields: queryPlan.fields,
+        calls: coqlResult.info?.pagesFetched || 1,
+        recordsPerCall: coqlResult.info?.recordsPerCall,
+        totalMatchingRecords: coqlResult.data.length,
+        startedAt: retrievalStartedAt,
+      });
       return cacheResult(addRetrievalMetadata(
         coqlResult,
         effectiveOptions,
@@ -710,6 +764,16 @@ async function getRecords(moduleKey, options = {}) {
         retrievalComplete: merged.info.retrievalComplete,
       });
 
+      logRetrievalTelemetry({
+        moduleKey: normalizedKey,
+        criteria: effectiveOptions.criteria,
+        fields: responseFields,
+        calls: result?.info?.pagesFetched || pagesFetched,
+        recordsPerCall: result?.info?.recordsPerCall,
+        totalMatchingRecords: merged.data?.length || 0,
+        startedAt: retrievalStartedAt,
+      });
+
       logRetrievalComplete(normalizedKey, pagesFetched, totalRecords, {
         source: 'crm_records_api',
         resultPreview: merged.data?.slice(0, 3) || [],
@@ -736,6 +800,16 @@ async function getRecords(moduleKey, options = {}) {
     logRetrievalComplete(normalizedKey, 1, response.data?.data?.length || response.data?.users?.length || 0, {
       source: 'crm_records_api',
       resultPreview: response.data?.data?.slice(0, 3) || response.data?.users?.slice(0, 3) || [],
+    });
+
+    logRetrievalTelemetry({
+      moduleKey: normalizedKey,
+      criteria: effectiveOptions.criteria,
+      fields: responseFields,
+      calls: 1,
+      recordsPerCall: [response.data?.data?.length || response.data?.users?.length || 0],
+      totalMatchingRecords: response.data?.data?.length || response.data?.users?.length || 0,
+      startedAt: retrievalStartedAt,
     });
 
     return cacheResult(addRetrievalMetadata(

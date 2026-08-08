@@ -523,6 +523,7 @@ async function fetchAllPages({
   let pageToken = null;
   let lastPayload = null;
   let complete = false;
+  const recordsPerCall = [];
 
   while (true) {
     const params = {
@@ -543,6 +544,7 @@ async function fetchAllPages({
     pagesFetched += 1;
     const pageRecords = Array.isArray(payload?.[dataKey]) ? payload[dataKey] : [];
     const info = payload?.info || {};
+    recordsPerCall.push(pageRecords.length);
 
     lastPayload = payload || {};
 
@@ -644,6 +646,7 @@ async function fetchAllPages({
     retrievalComplete: { value: complete, enumerable: false, configurable: true },
     pagesFetched: { value: pagesFetched, enumerable: false, configurable: true },
     duplicateRecordsRemoved: { value: duplicateRecordsRemoved, enumerable: false, configurable: true },
+    recordsPerCall: { value: recordsPerCall, enumerable: false, configurable: true },
   });
 
   return {
