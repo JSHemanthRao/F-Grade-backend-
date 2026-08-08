@@ -480,11 +480,14 @@ function getRetrievalPlan(moduleDefinition, options = {}) {
       : buildOrCriteria(getSearchableFields(moduleDefinition), specificSearchTerm);
 
     return {
-      strategy: RETRIEVAL_STRATEGIES.FULL_DATASET,
-      fetchAll: true,
+      // A specifically named CRM record is a bounded lookup. The criteria
+      // narrows the requested dataset to the matching record itself; this is
+      // distinct from a filtered collection query such as "all Closed Won".
+      strategy: RETRIEVAL_STRATEGIES.PAGINATED_LIST,
+      fetchAll: false,
       params: {
         page: 1,
-        per_page: DEFAULT_PER_PAGE,
+        per_page: SINGLE_RECORD_PER_PAGE,
         ...(criteria ? { criteria } : {}),
       },
       reason: 'specific_record_search',

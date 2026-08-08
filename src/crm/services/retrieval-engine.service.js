@@ -438,13 +438,26 @@ async function executeCoqlRecords(moduleKey, queryPlan, options = {}) {
 
     const hasMore = lastInfo.more_records === true || lastInfo.has_more === true;
     if (!completeRequest || !batchSize || !hasMore && pageData.length < batchSize) break;
-    if (pageData.length === 0) break;
+    if (pageData.length === 0) {
+      const error = new Error(`Incomplete CRM retrieval for ${moduleKey || 'module'}: an empty COQL page reported more records`);
+      error.code = 'RETRIEVAL_INCOMPLETE';
+      throw error;
+    }
     offset += batchSize;
   }
 
   return {
     data: records,
-    info: { ...lastInfo, count: records.length, page: requestedPage, per_page: batchSize || requestedPerPage || records.length, retrievalStrategy: 'coql', more_records: false, retrievalComplete: true, pagesFetched },
+    info: {
+      ...lastInfo,
+      count: records.length,
+      page: requestedPage,
+      per_page: batchSize || requestedPerPage || records.length,
+      retrievalStrategy: 'coql',
+      more_records: false,
+      retrievalComplete: true,
+      pagesFetched,
+    },
   };
 }
 
@@ -569,11 +582,12 @@ async function getRecords(moduleKey, options = {}) {
 
   if (queryPlan.mode === 'coql') {
     try {
+      const coqlResult = await executeCoqlRecords(normalizedKey, queryPlan, effectiveOptions);
       return cacheResult(addRetrievalMetadata(
-        await executeCoqlRecords(normalizedKey, queryPlan, effectiveOptions),
+        coqlResult,
         effectiveOptions,
-        1,
-        true,
+        coqlResult.info?.pagesFetched || 1,
+        coqlResult.info?.retrievalComplete !== false,
       ));
     } catch (error) {
       logRequestError(error, normalizedKey, moduleDefinition, { select_query: queryPlan.query }, queryPlan.fields);

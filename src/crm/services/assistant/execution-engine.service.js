@@ -47,7 +47,7 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
         const contextual = contextDatasets.find((dataset) => dataset.cacheKey === cacheKey
           || (dataset.module === moduleKey
             && dataset.requestFingerprint === context.lastQuestion
-            && (dataset.period === period || (step.type === 'compare' && dataset.period == null))));
+            && (dataset.period === period || (step.type === 'compare' && dataset.period == null && period === 'this month'))));
         const cached = requestCache.get(cacheKey) || contextual?.result;
         if (cached) {
           datasets.push({ step, period, module: moduleKey, result: cached, reused: true });

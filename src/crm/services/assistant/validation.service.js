@@ -262,7 +262,9 @@ function validateExecution({ plan, question, datasets, calculations, limitations
   const allIds = [];
   datasets.forEach((dataset) => {
     if (!dataset?.result || typeof dataset.result !== 'object') issues.push('dataset_missing');
-    if (dataset?.result?.info?.more_records === true && !dataset.step?.explicit) issues.push('dataset_incomplete');
+    const retrievalInfo = dataset?.result?.info || {};
+    if ((retrievalInfo.more_records === true || retrievalInfo.retrievalComplete === false)
+      && !dataset.step?.explicit) issues.push('dataset_incomplete');
     const ids = getRecords(dataset).map((record) => record?.id ?? record?.ID).filter(Boolean).map(String);
     allIds.push(...ids);
     if (new Set(ids).size !== ids.length) issues.push('duplicate_records');

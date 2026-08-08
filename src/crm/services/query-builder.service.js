@@ -14,7 +14,11 @@ function getRequestText(options = {}) {
 function shouldUseCoql(options = {}) {
   const requestText = getRequestText(options);
   const criteria = normalizeText(options.criteria || options.filter || options.filters);
-  return Boolean(options.force_coql || DATE_WORDS.test(requestText) || ANALYTICS_WORDS.test(requestText) || DATE_WORDS.test(criteria));
+  // Criteria-bearing list requests must stay on the Search API so the
+  // retrieval engine can walk every Zoho page. COQL remains available for
+  // unstructured date queries, analytics, and explicit fallback requests.
+  return Boolean(options.force_coql || ANALYTICS_WORDS.test(requestText)
+    || (DATE_WORDS.test(requestText) && !criteria));
 }
 
 function getQuarterWindow(quarterOffset = 0) {

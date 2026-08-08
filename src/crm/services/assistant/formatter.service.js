@@ -101,6 +101,26 @@ function retrievalComplete(datasets) {
   });
 }
 
+function retrievalExplicitlyIncomplete(datasets) {
+  return datasets.some((dataset) => {
+    const info = dataset?.result?.info || dataset?.info || {};
+    return info.more_records === true || info.retrievalComplete === false;
+  });
+}
+
+function exactEmptyResultSummary(plan) {
+  const question = String(plan?.question || '');
+  const timeRange = plan?.timeRange || {};
+  if (!/closed\s+won/i.test(question) || !/\bdeal(?:s)?\b/i.test(question)) return null;
+
+  const monthMatch = question.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(20\d{2}))?\b/i);
+  if (!monthMatch) return null;
+
+  const month = `${monthMatch[1].charAt(0).toUpperCase()}${monthMatch[1].slice(1).toLowerCase()}`;
+  const year = monthMatch[2] || timeRange.year || new Date().getUTCFullYear();
+  return `No Closed Won deals were found for ${month} ${year}.`;
+}
+
 function monthKey(value) {
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.valueOf()) ? date.toISOString().slice(0, 7) : null;
@@ -275,10 +295,15 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     logFallbackReason(options.emptyReason || FALLBACK_REASONS.EMPTY_RESULT);
   }
 
+  const incompleteRetrieval = retrievalExplicitlyIncomplete(datasets);
+  const emptySummary = exactEmptyResultSummary(plan)
+    || chooseFallback({ reason: options.emptyReason || FALLBACK_REASONS.EMPTY_RESULT }).answer;
   const summary = conversionUnavailable
     ? 'Lead conversion cannot be calculated from the CRM records.'
+    : incompleteRetrieval
+      ? 'The CRM search could not be completed, so I cannot confirm whether matching records exist.'
     : records.length === 0
-      ? 'No matching records found.'
+      ? emptySummary
       : plan.intents?.includes('LIST') && calculations.length === 0
         ? `${currentMonthLabel}Showing ${displayRecords.length} of ${displayTotal} matching records.${displayTotal > displayRecords.length ? ` There are ${displayTotal - (displayStart + displayRecords.length)} more matching records available.` : ''}`
       : `${currentMonthLabel}${metricSummary(calculations, records.length)}`;

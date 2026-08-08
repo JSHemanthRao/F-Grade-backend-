@@ -247,6 +247,39 @@ test('RetrievalEngine retrieves date-range COQL requests as a complete dataset',
   }
 });
 
+test('RetrievalEngine preserves COQL pagination metadata across complete batches', async () => {
+  const originalPost = zohoClient.post;
+  const queries = [];
+  zohoClient.post = async (_url, body) => {
+    queries.push(body.select_query);
+    if (queries.length === 1) {
+      return {
+        data: {
+          data: Array.from({ length: 2000 }, (_, index) => ({ id: `deal-${index}` })),
+          info: { more_records: true },
+        },
+      };
+    }
+    return { data: { data: [{ id: 'deal-2000' }], info: { more_records: false } } };
+  };
+
+  try {
+    const result = await RetrievalEngine.getRecords('deals', {
+      question: 'Show deals',
+      retrieval_mode: 'all',
+      force_coql: true,
+    });
+    assert.equal(queries.length, 2);
+    assert.match(queries[0], /limit 2000$/i);
+    assert.match(queries[1], /limit 2000 offset 2000$/i);
+    assert.equal(result.data.length, 2001);
+    assert.equal(result.info.pagesFetched, 2);
+    assert.equal(result.info.retrievalComplete, true);
+  } finally {
+    restoreZoho(zohoClient.get, originalPost);
+  }
+});
+
 test('RetrievalEngine supports empty datasets without fabricating records', async () => {
   const originalGet = zohoClient.get;
   zohoClient.get = async () => ({ data: { data: [], info: { more_records: false } } });

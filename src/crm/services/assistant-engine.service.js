@@ -40,24 +40,48 @@ function displayLimitFor(plan) {
     : DISPLAY_LIMIT;
 }
 
+function displayContextFromPayload(context = {}) {
+  if (!Array.isArray(context.datasets) || context.datasets.length === 0) return null;
+  const records = completeRecordsFrom(context.datasets);
+  const plan = context.lastPlan || context.plan || {
+    question: context.lastQuestion || 'CRM records',
+    modules: [...new Set(context.datasets.map((dataset) => dataset?.module).filter(Boolean))],
+    intents: ['LIST'],
+    timeRange: { label: 'all time' },
+  };
+  const limit = displayLimitFor(plan);
+  const initial = getDisplayBatch(createDisplayState(records), limit);
+  return {
+    plan,
+    datasets: context.datasets,
+    calculations: Array.isArray(context.calculations) ? context.calculations : [],
+    insights: Array.isArray(context.insights) ? context.insights : [],
+    limitations: Array.isArray(context.limitations) ? context.limitations : [],
+    limit,
+    state: initial.nextState,
+  };
+}
+
 async function handleAssistantRequest(payload = {}) {
   const question = String(payload?.question || '').trim();
   if (!question) return { success: false, message: 'A question is required.' };
 
   const suppliedContext = payload?.context || payload?.conversationContext || {};
   const continuation = isDisplayContinuation(question);
-  if (continuation && !suppliedContext.datasets?.length && !lastDisplayContext) {
+  const contextDisplay = displayContextFromPayload(suppliedContext);
+  const activeDisplayContext = contextDisplay || lastDisplayContext;
+  if (continuation && !suppliedContext.datasets?.length && !activeDisplayContext) {
     return { success: false, message: 'Please specify which CRM records you want to continue viewing.' };
   }
-  if (continuation && lastDisplayContext) {
-    const display = getDisplayBatch(lastDisplayContext.state, lastDisplayContext.limit);
+  if (continuation && activeDisplayContext) {
+    const display = getDisplayBatch(activeDisplayContext.state, activeDisplayContext.limit);
     if (display.records.length === 0) {
       return { success: true, summary: 'No more matching records are available.', data: [], tables: [] };
     }
-    lastDisplayContext = { ...lastDisplayContext, state: display.nextState };
-    return formatResponse(lastDisplayContext.plan, lastDisplayContext.datasets, lastDisplayContext.calculations, {
-      insights: lastDisplayContext.insights,
-      limitations: lastDisplayContext.limitations,
+    lastDisplayContext = { ...activeDisplayContext, state: display.nextState };
+    return formatResponse(activeDisplayContext.plan, activeDisplayContext.datasets, activeDisplayContext.calculations, {
+      insights: activeDisplayContext.insights,
+      limitations: activeDisplayContext.limitations,
       displayRecords: display.records,
       displayStart: display.start,
       displayTotal: display.total,
@@ -97,7 +121,19 @@ async function handleAssistantRequest(payload = {}) {
     datasets = await executePlan({ plan, question, moduleCandidates, context, conversionDiscovery, filterPlans: filterPlans.byModule });
     datasets = datasets.map((dataset) => {
       const filterPlan = filterPlans.byModule[dataset.module];
-      const applied = applyFilterToDataset(dataset, filterPlan);
+      // Period-specific retrieval already applies its date window on the
+      // CRM side. The testable/local pass should enforce the remaining
+      // filters without discarding records that do not repeat date fields.
+      const localFilterPlan = dataset.period
+        || dataset.step?.type !== 'query'
+        ? {
+          ...filterPlan,
+          filters: filterPlan.filters.filter((filter) => filter.logicalField !== 'date'),
+          canonicalFilters: filterPlan.canonicalFilters.filter((filter) => filter.logicalField !== 'date'),
+          localFilters: filterPlan.localFilters.filter((filter) => filter.logicalField !== 'date'),
+        }
+        : filterPlan;
+      const applied = applyFilterToDataset(dataset, localFilterPlan);
       if (!applied.valid) throw new Error('FILTER_VALIDATION_ERROR');
       return applied.dataset;
     });
@@ -115,7 +151,9 @@ async function handleAssistantRequest(payload = {}) {
   let calculations = validation.hasOwnProperty('calculations') ? validation.calculations : result.calculations;
   let limitations = validation.hasOwnProperty('limitations') ? validation.limitations : result.limitations;
   if (!validation.valid && validation.issues.includes('dataset_incomplete')) {
-    for (const dataset of merged.datasets.filter((item) => item.result?.info?.more_records === true && !item.step?.explicit)) {
+    for (const dataset of merged.datasets.filter((item) => (
+      item.result?.info?.more_records === true || item.result?.info?.retrievalComplete === false
+    ) && !item.step?.explicit)) {
       const options = { question, fields: dataset.step.requiredFieldsByModule?.[dataset.module], retrieval_mode: 'all', force_coql: true };
       dataset.result = await recordsService.getRecords(dataset.module, options);
     }

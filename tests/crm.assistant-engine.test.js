@@ -277,3 +277,54 @@ test('assistant searches all Deals before displaying Closed Won June 2026 matche
     recordsService.getRecords = originalGetRecords;
   }
 });
+
+test('assistant only reports zero Closed Won June matches after complete retrieval', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  recordsService.getRecords = async () => ({
+    data: [],
+    info: { count: 0, retrievalComplete: true, more_records: false },
+  });
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Give me Closed Won deals in June 2026.' });
+    assert.equal(response.summary, 'No Closed Won deals were found for June 2026.');
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('assistant displays at most 25 complete matches and reuses them for show more', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  let calls = 0;
+  recordsService.getRecords = async () => {
+    calls += 1;
+    return {
+      data: Array.from({ length: 47 }, (_, index) => ({ id: `deal-${index + 1}`, Stage: 'Closed Won' })),
+      info: { count: 47, retrievalComplete: true, more_records: false },
+    };
+  };
+
+  try {
+    const first = await assistantEngine.handleAssistantRequest({ question: 'Show Closed Won deals' });
+    const second = await assistantEngine.handleAssistantRequest({ question: 'show more' });
+
+    assert.equal(calls, 1);
+    assert.equal(first.data.length, 25);
+    assert.match(first.summary, /Showing 25 of 47 matching records/);
+    assert.equal(second.data.length, 22);
+    assert.equal(second.data[0].id, 'deal-26');
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
+test('assistant does not turn an incomplete empty dataset into a no-match answer', () => {
+  const response = formatResponse(
+    { question: 'Give me Closed Won deals in June 2026.', modules: ['deals'], intents: ['LIST'] },
+    [{ result: { data: [], info: { retrievalComplete: false, more_records: true } } }],
+    [],
+  );
+
+  assert.doesNotMatch(response.summary, /No Closed Won deals were found/);
+  assert.match(response.summary, /search could not be completed/i);
+});
