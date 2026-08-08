@@ -92,7 +92,7 @@ const spec = {
         operationId: 'queryCRMRecords',
         tags: ['CRM'],
         summary: 'Query Zoho CRM records',
-        description: 'Use this operation when the user asks to view, list, show, retrieve, or inspect CRM records. Supports pagination and field/filter selection.',
+        description: 'Use this operation when the user asks to view, list, show, retrieve, or inspect CRM records. The backend searches the complete matching CRM dataset internally and returns a display batch. Do not treat one returned batch as the complete dataset.',
         parameters: [
           {
             name: 'module',

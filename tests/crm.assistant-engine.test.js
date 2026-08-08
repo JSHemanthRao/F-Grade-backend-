@@ -248,3 +248,32 @@ test('assistant returns CRM-backed results for the six supported CRM questions',
     recordsService.getRecords = originalGetRecords;
   }
 });
+
+test('assistant searches all Deals before displaying Closed Won June 2026 matches', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  const records = [
+    ...Array.from({ length: 25 }, (_, index) => ({
+      id: `other-${index}`,
+      Stage: 'Negotiation',
+      Closing_Date: '2026-06-10T00:00:00Z',
+    })),
+    { id: 'matching-june-deal', Stage: 'Closed Won', Closing_Date: '2026-06-15T00:00:00Z' },
+    { id: 'wrong-month-deal', Stage: 'Closed Won', Closing_Date: '2026-07-15T00:00:00Z' },
+  ];
+  let receivedOptions;
+  recordsService.getRecords = async (_module, options) => {
+    receivedOptions = options;
+    return { data: records, info: { count: records.length, retrievalComplete: true, more_records: false } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Give me Closed Won deals in June 2026.' });
+
+    assert.equal(receivedOptions.retrieval_mode, 'all');
+    assert.deepEqual(response.data.map((record) => record.id), ['matching-june-deal']);
+    assert.match(response.summary, /Showing 1 of 1 matching records/);
+    assert.doesNotMatch(response.summary, /No matching records found/);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});

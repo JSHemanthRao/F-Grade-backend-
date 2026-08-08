@@ -27,7 +27,9 @@ function getDisplayBatch(state, limit = DISPLAY_LIMIT) {
 }
 
 function isDisplayContinuation(question = '') {
-  return /\b(?:show\s+more|remaining|next|continue|show\s+the\s+rest|show\s+rest|show\s+(?:those|them|the\s+same)|(?:those|them|same\s+records))\b/i.test(String(question));
+  const text = String(question).trim();
+  return /^(?:show\s+more|remaining|continue|show\s+the\s+rest|show\s+rest|show\s+(?:those|them|the\s+same)|(?:those|them|same\s+records))(?:\s+records?)?[.!?]*$/i.test(text)
+    || /^(?:next)(?:\s+records?)?[.!?]*$/i.test(text);
 }
 
 module.exports = {

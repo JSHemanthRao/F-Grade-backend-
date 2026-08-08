@@ -35,18 +35,13 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
         const requestOptions = {
           question,
           ...(period ? { request_text: stepQuestion } : {}),
-          ...(step.type === 'query' && step.explicit ? {
-            page: step.page,
-            ...(step.per_page ? { per_page: step.per_page } : {}),
-            offset: step.offset,
-          } : {}),
           ...(conversionDiscovery ? { conversion_fields: conversionDiscovery.fields, conversion_metric: step.metric } : {}),
           criteria: period ? filterPlan.serverCriteriaWithoutDate : filterPlan.serverCriteria,
           canonicalFilters: filterPlan.canonicalFilters,
           requestedFilters: filterPlan.requestedFilters,
           ...(step.requiredFieldsByModule?.[moduleKey]?.length ? { fields: step.requiredFieldsByModule[moduleKey] } : {}),
           retrievalCache: requestCache,
-          retrieval_mode: ['count', 'aggregate', 'analytics', 'compare', 'conversion_count'].includes(step.type) ? 'all' : (step.type === 'query' && step.explicit ? 'page' : 'auto'),
+          retrieval_mode: 'all',
         };
         const cacheKey = JSON.stringify({ moduleKey, period, type: step.type, options: requestOptions });
         const contextual = contextDatasets.find((dataset) => dataset.cacheKey === cacheKey

@@ -131,6 +131,33 @@ test('CRM controller resolves the requested module from the matched route path',
   recordsService.getRecords = originalGetRecords;
 });
 
+test('CRM query tool treats Copilot 1/25 defaults as complete retrieval', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  let receivedOptions;
+  recordsService.getRecords = async (_moduleName, options) => {
+    receivedOptions = options;
+    return { data: [{ id: '1' }], info: { count: 26, retrievalComplete: true } };
+  };
+
+  try {
+    const req = {
+      method: 'GET',
+      query: { module: 'deals', page: '1', per_page: '25', filter: '(Stage:equals:Closed Won)' },
+      body: {},
+      route: { path: '/query' },
+    };
+    const res = { json(payload) { this.payload = payload; } };
+
+    await controller.getModuleQuery(req, res, () => {});
+
+    assert.equal(receivedOptions.retrieval_mode, 'all');
+    assert.equal(receivedOptions.criteria, undefined);
+    assert.equal(res.payload.count, 26);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
 test('CRM controller resolves the requested module from the query string', async () => {
   const originalGetRecords = recordsService.getRecords;
   let receivedModule;
@@ -487,6 +514,46 @@ test('CRM service fetches beyond page 1 for complete dataset requests on any mod
     });
     assert.equal(result.data.length, 52);
     assert.equal(result.info.count, 52);
+  } finally {
+    zohoClient.get = originalGet;
+  }
+});
+
+test('CRM service completes Closed Won June 2026 searches across later pages', async () => {
+  const originalGet = zohoClient.get;
+  const requests = [];
+  const pages = [
+    {
+      data: Array.from({ length: 25 }, (_, index) => ({
+        id: `june-page-one-${index}`,
+        Stage: 'Closed Won',
+        Closing_Date: '2026-06-10T00:00:00+05:30',
+      })),
+      info: { more_records: true },
+    },
+    {
+      data: [
+        { id: 'closed-won-june', Stage: 'Closed Won', Closing_Date: '2026-06-15T00:00:00+05:30' },
+      ],
+      info: { more_records: false },
+    },
+  ];
+
+  zohoClient.get = async (url, config) => {
+    requests.push({ url, config });
+    return { data: pages[requests.length - 1] };
+  };
+
+  try {
+    const result = await recordsService.getRecords('deals', {
+      question: 'Give me Closed Won deals in June 2026',
+      criteria: '((Stage:equals:Closed Won)and(Closing_Date:greater_equal:2026-06-01T00:00:00Z)and(Closing_Date:less_than:2026-07-01T00:00:00Z))',
+    });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map((request) => request.config.params.page), [1, 2]);
+    assert.equal(result.data.length, 26);
+    assert.equal(result.data.every((record) => record.Stage === 'Closed Won' && record.Closing_Date.startsWith('2026-06')), true);
   } finally {
     zohoClient.get = originalGet;
   }

@@ -59,6 +59,9 @@ function sendCountResponse(req, res, moduleDefinition, result, executionTime) {
 
 function buildCommonOptions(req) {
   const requestSource = req.method === 'POST' ? req.body : req.query;
+  const hasExplicitApiPage = requestSource?.page !== undefined && requestSource?.page !== null && requestSource?.page !== ''
+    && !(Number(requestSource?.page) === 1 && Number(requestSource?.per_page) === 25);
+  const retrievalMode = hasExplicitApiPage ? undefined : 'all';
 
   return {
     page: requestSource?.page,
@@ -76,6 +79,7 @@ function buildCommonOptions(req) {
     message: requestSource?.message,
     sort_by: requestSource?.sort_by,
     sort_order: requestSource?.sort_order,
+    retrieval_mode: retrievalMode,
   };
 }
 
