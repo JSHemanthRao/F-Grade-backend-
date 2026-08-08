@@ -122,10 +122,11 @@ function parseDate(value) {
 }
 
 function parseDateFilter(question, timeRange, moduleKey) {
-  if (/\b(?:compare|versus|vs)\b/i.test(question) && /\b(?:this|last|current|previous)\s+(?:month|year)\b/i.test(question)) return null;
-  if (timeRange?.periods?.length > 1 && /\b(?:compare|versus|vs)\b/i.test(question)) return null;
   const range = timeRange || detectTimeRange(question);
-  if (!range.startDate || !range.endDate || range.range === 'all_time') return null;
+  const isCompare = /\b(?:compare|versus|vs)\b/i.test(question);
+  const hasRelativeMonthOrYear = /\b(?:this|last|current|previous)\s+(?:month|year)\b/i.test(question);
+  if (isCompare && hasRelativeMonthOrYear && range?.periods?.length > 1) return null;
+  if (!range?.startDate || !range?.endDate || range.range === 'all_time') return null;
   return {
     field: /conver|converted/i.test(question) ? 'Converted_Date_Time' : (DATE_FIELDS_BY_MODULE[moduleKey] || 'Created_Time'),
     logicalField: 'date',
@@ -192,6 +193,41 @@ function parseQuestionFilters(question, moduleKey, timeRange) {
   const dateFilter = parseDateFilter(question, timeRange, moduleKey) || parseYearFilter(question, moduleKey);
   if (dateFilter) filters.push(dateFilter);
   return filters;
+}
+
+function hasStageRequest(question) {
+  return /(closed\s*won|closed\s*lost|qualification|needs\s+analysis|value\s+proposition|negotiation|proposal|new|open|won|lost)\b/i.test(question);
+}
+
+function hasOwnerRequest(question) {
+  return /\b(?:owned\s+by|owner(?:\s+is)?|assigned\s+to)\b/i.test(question);
+}
+
+function hasCompanyRequest(question) {
+  return /\b(?:company|account|customer)\b(?:\s+is|\s+named|\s*=|\s*:)?/i.test(question);
+}
+
+function hasAmountRequest(question) {
+  return /\b(?:between\s+[^\s]+\s+and\s+[^\s]+|above|over|greater\s+than|at\s+least|below|under|less\s+than|at\s+most|₹|rs\.?|\$|€|£|lakh|lakhs|crore|crores|k|m|million|billion)\b/i.test(question);
+}
+
+function hasDateRequest(question, timeRange, moduleKey) {
+  return Boolean(
+    parseDateFilter(question, timeRange, moduleKey)
+    || parseYearFilter(question, moduleKey)
+    || /\b(?:today|yesterday|tomorrow|this\s+week|last\s+week|this\s+month|last\s+month|last\s+\d+\s+months?|this\s+quarter|last\s+quarter|this\s+year|last\s+year|january|february|march|april|may|june|july|august|september|october|november|december|between\s+.*\s+and\s+.*)\b/i.test(question),
+  );
+}
+
+function detectRequestedFilters(question, timeRange, moduleKey) {
+  const normalizedQuestion = String(question || '');
+  return {
+    stage: hasStageRequest(normalizedQuestion),
+    owner: hasOwnerRequest(normalizedQuestion),
+    company: hasCompanyRequest(normalizedQuestion),
+    amount: hasAmountRequest(normalizedQuestion),
+    date: hasDateRequest(normalizedQuestion, timeRange, moduleKey),
+  };
 }
 
 function normalizeStructuredFilter(filter) {
@@ -328,13 +364,37 @@ function buildFilterPlan({ question = '', module, modules = [], plan = {}, conte
     }
     return true;
   });
-  const validationErrors = applicableFilters.flatMap((filter) => validateFilter(filter, moduleKey, records));
+  const requestedFilters = detectRequestedFilters(question, plan.timeRange, moduleKey);
+  const requestedValidationErrors = [];
+
+  if (requestedFilters.stage && !applicableFilters.some((filter) => filter.logicalField === 'stage')) {
+    requestedValidationErrors.push({ code: 'MISSING_REQUESTED_STAGE_FILTER', field: 'stage', message: 'A stage filter was requested but could not be applied.' });
+  }
+  if (requestedFilters.date && !applicableFilters.some((filter) => filter.logicalField === 'date')) {
+    requestedValidationErrors.push({ code: 'MISSING_REQUESTED_DATE_FILTER', field: 'date', message: 'A date filter was requested but could not be applied.' });
+  }
+  if (requestedFilters.owner && !applicableFilters.some((filter) => filter.logicalField === 'owner')) {
+    requestedValidationErrors.push({ code: 'MISSING_REQUESTED_OWNER_FILTER', field: 'owner', message: 'An owner filter was requested but could not be applied.' });
+  }
+  if (requestedFilters.amount && !applicableFilters.some((filter) => filter.logicalField === 'amount')) {
+    requestedValidationErrors.push({ code: 'MISSING_REQUESTED_AMOUNT_FILTER', field: 'amount', message: 'An amount filter was requested but could not be applied.' });
+  }
+  if (requestedFilters.company && !applicableFilters.some((filter) => filter.logicalField === 'company')) {
+    requestedValidationErrors.push({ code: 'MISSING_REQUESTED_COMPANY_FILTER', field: 'company', message: 'A company filter was requested but could not be applied.' });
+  }
+
+  const validationErrors = [
+    ...applicableFilters.flatMap((filter) => validateFilter(filter, moduleKey, records)),
+    ...requestedValidationErrors,
+  ];
   const valid = validationErrors.length === 0;
   const criteria = valid ? serverCriteria(applicableFilters) : null;
   const result = {
     valid,
     module: moduleKey,
     filters: applicableFilters,
+    canonicalFilters: applicableFilters,
+    requestedFilters,
     serverCriteria: criteria,
     serverCriteriaWithoutDate: valid ? serverCriteria(applicableFilters.filter((filter) => filter.logicalField !== 'date')) : null,
     localFilters: applicableFilters.filter((filter) => filter.field === '*'),
@@ -355,9 +415,7 @@ function buildFilterPlan({ question = '', module, modules = [], plan = {}, conte
 function applyFilterPlan(records = [], filterPlan = {}) {
   const startedAt = process.hrtime.bigint();
   if (!filterPlan.valid) return { valid: false, records: [], error: { code: 'FILTER_VALIDATION_ERROR', details: filterPlan.validationErrors } };
-  const applicableFilters = filterPlan.serverCriteria
-    ? filterPlan.filters.filter((filter) => filter.field === '*' || records.some((record) => Object.keys(record || {}).some((key) => key.toLowerCase() === String(filter.field).toLowerCase())))
-    : filterPlan.filters;
+  const applicableFilters = Array.isArray(filterPlan.filters) ? filterPlan.filters : [];
   const filtered = applicableFilters.length === 0
     ? records
     : records.filter((record) => applicableFilters.every((filter) => matchesFilter(record, filter)));

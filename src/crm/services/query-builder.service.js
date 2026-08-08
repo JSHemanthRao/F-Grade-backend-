@@ -130,7 +130,7 @@ function buildWhereClause(moduleKey, requestText, criteria, options = {}) {
         return `${field} ${operators[operator.toLowerCase()]} '${value}'`;
       },
     );
-    if (translated && translated !== criteria) clauses.push(translated);
+    return translated || null;
   }
   return clauses.length ? clauses.map((clause) => `(${clause})`).join(' and ') : null;
 }

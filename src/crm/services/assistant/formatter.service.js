@@ -47,7 +47,12 @@ function formatMetricValue(type, value) {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === 'difference' || key.includes('month') ? formatCurrency(item) : item]));
   }
   if (type === 'multi_module_comparison' && value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([module, metrics]) => [module, Object.fromEntries(Object.entries(metrics).map(([key, item]) => [key, formatCurrency(item)]))]));
+    return Object.fromEntries(Object.entries(value).map(([module, metrics]) => {
+      if (metrics && typeof metrics === 'object' && Number.isFinite(numericValue(metrics.value))) {
+        return [module, { value: formatCurrency(metrics.value) }];
+      }
+      return [module, Object.fromEntries(Object.entries(metrics).map(([key, item]) => [key, formatCurrency(item)]))];
+    }));
   }
   if (['stage_distribution', 'conversion_by_owner'].includes(type) && value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, formatNumber(item)]));
@@ -167,7 +172,14 @@ function metricSummary(calculations, dataLength) {
   if (pipeline) return `Pipeline value: ${formatCurrency(pipeline.value)}.`;
   if (stageDistribution) return `Stage distribution: ${Object.entries(stageDistribution.value).map(([stage, value]) => `${stage} ${formatNumber(value)}`).join(', ')}.`;
   if (monthly) return `Monthly values: ${Object.entries(monthly.value.monthlyTotals).map(([month, value]) => `${month} ${formatCurrency(value)}`).join(', ')}.`;
-  if (multi) return `comparison: ${Object.entries(multi.value).map(([module, values]) => `${module}: this month ${formatCurrency(values['this month'])}, last month ${formatCurrency(values['last month'])}, difference ${formatCurrency(values.difference)}`).join('; ')}.`;
+  if (multi) {
+    return `comparison: ${Object.entries(multi.value).map(([module, values]) => {
+      if (values && typeof values === 'object' && Number.isFinite(numericValue(values.value))) {
+        return `${module}: ${formatCurrency(values.value)}`;
+      }
+      return `${module}: this month ${formatCurrency(values['this month'])}, last month ${formatCurrency(values['last month'])}, difference ${formatCurrency(values.difference)}`;
+    }).join('; ')}.`;
+  }
   if (comparison) return `comparison: this month ${formatCurrency(comparison.value['this month'])}; last month ${formatCurrency(comparison.value['last month'])}; difference ${formatCurrency(comparison.value.difference)}.`;
   if (average) return `Average deal value: ${formatCurrency(average.value)}.`;
   if (sum) return `Total value: ${formatCurrency(sum.value)}.`;
@@ -238,6 +250,9 @@ function factualObservations(observations) {
 
 function formatResponse(plan, datasets, calculations, options = {}) {
   const records = recordsFrom(datasets);
+  const displayRecords = Array.isArray(options.displayRecords) ? options.displayRecords : records.slice(0, 25);
+  const displayStart = Number.isInteger(options.displayStart) ? options.displayStart : 0;
+  const displayTotal = Number.isInteger(options.displayTotal) ? options.displayTotal : records.length;
   const coverage = buildCoverage(plan, datasets, records);
   const currentMonthLabel = plan.timeRange?.includesCurrentMonth ? 'Current Month (Month-to-Date): ' : '';
   const conversionUnavailable = Boolean(options.conversionFallback) || calculations.some((calculation) => calculation.type === 'conversion_unavailable');
@@ -262,8 +277,10 @@ function formatResponse(plan, datasets, calculations, options = {}) {
 
   const summary = conversionUnavailable
     ? 'Lead conversion cannot be calculated from the CRM records.'
-    : records.length === 0 && calculations.length === 0
-      ? chooseFallback({ reason: options.emptyReason || FALLBACK_REASONS.EMPTY_RESULT }).answer
+    : records.length === 0
+      ? 'No matching records found.'
+      : plan.intents?.includes('LIST') && calculations.length === 0
+        ? `${currentMonthLabel}Showing ${displayRecords.length} of ${displayTotal} matching records.${displayTotal > displayRecords.length ? ` There are ${displayTotal - (displayStart + displayRecords.length)} more matching records available.` : ''}`
       : `${currentMonthLabel}${metricSummary(calculations, records.length)}`;
   const summaryWithAvailability = crmReturnedDate(datasets)
     ? `${summary} Data available through ${crmReturnedDate(datasets)}.`
@@ -287,8 +304,8 @@ function formatResponse(plan, datasets, calculations, options = {}) {
     limitations,
     keyMetrics: presentMetrics(calculations),
     suggestedNextAnalysis: followUps,
-    data: records,
-    tables: buildTables(records),
+    data: displayRecords,
+    tables: buildTables(displayRecords),
     calculations,
     insights: observations,
     followUpQuestions: followUps,

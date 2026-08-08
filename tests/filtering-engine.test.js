@@ -57,6 +57,39 @@ test('Filtering Engine supports custom ranges and specific years', () => {
   assert.equal(year.filters.some((filter) => filter.source === 'year'), true);
 });
 
+test('Filtering Engine preserves exact stage and month filters for June Closed Won deals', () => {
+  const plan = buildFilterPlan({ question: 'Show Closed Won Deals in June 2026', module: 'deals' });
+  assert.equal(plan.valid, true);
+  assert.equal(plan.filters.length, 2);
+  assert.equal(plan.filters.some((filter) => filter.logicalField === 'stage'), true);
+  assert.equal(plan.filters.some((filter) => filter.logicalField === 'date'), true);
+  assert.equal(plan.serverCriteria, '(Stage:equals:Closed Won)and(Closing_Date:greater_equal:2026-06-01T00:00:00Z)and(Closing_Date:less_than:2026-07-01T00:00:00Z)');
+});
+
+test('Filtering Engine preserves exact stage and month filters for July Closed Won deals', () => {
+  const plan = buildFilterPlan({ question: 'Show Closed Won Deals in July 2026', module: 'deals' });
+  assert.equal(plan.valid, true);
+  assert.equal(plan.filters.length, 2);
+  assert.equal(plan.filters.some((filter) => filter.logicalField === 'stage'), true);
+  assert.equal(plan.filters.some((filter) => filter.logicalField === 'date'), true);
+  assert.equal(plan.serverCriteria, '(Stage:equals:Closed Won)and(Closing_Date:greater_equal:2026-07-01T00:00:00Z)and(Closing_Date:less_than:2026-08-01T00:00:00Z)');
+});
+
+test('Filtering Engine preserves exact quality of stage, date, owner, and amount filters', () => {
+  const plan = buildFilterPlan({ question: 'Show Closed Won Deals in June 2026 owned by Laya M for company Acme above ₹1,00,000', module: 'deals' });
+  assert.equal(plan.valid, true);
+  assert.equal(plan.filters.length, 5);
+  assert.deepEqual(plan.filters.map((filter) => filter.logicalField).sort(), ['amount', 'company', 'date', 'owner', 'stage'].sort());
+});
+
+test('Filtering Engine preserves exact stage, date, and amount filters for Closed Lost in June', () => {
+  const plan = buildFilterPlan({ question: 'Show Closed Lost Deals in June 2026', module: 'deals' });
+  assert.equal(plan.valid, true);
+  assert.equal(plan.filters.length, 2);
+  assert.equal(plan.filters.some((filter) => filter.logicalField === 'stage'), true);
+  assert.equal(plan.filters.some((filter) => filter.logicalField === 'date'), true);
+});
+
 test('Filtering Engine returns structured validation errors and does not continue', () => {
   const invalidField = buildFilterPlan({ filters: [{ field: 'Stage', operator: 'equals', value: 'Closed Won' }], module: 'accounts' });
   assert.equal(invalidField.valid, false);

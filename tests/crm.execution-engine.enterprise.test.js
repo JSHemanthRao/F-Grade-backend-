@@ -94,6 +94,30 @@ test('verification wording triggers a CRM execution immediately', async () => {
   }
 });
 
+test('assistant engine passes exact canonical criteria to CRM for June Closed Won deals', async () => {
+  const originalGetRecords = recordsService.getRecords;
+  const records = [
+    { id: 'd1', Stage: 'Closed Won', Closing_Date: '2026-06-10', Account_Name: 'Acme' },
+    { id: 'd2', Stage: 'Closed Won', Closing_Date: '2026-07-10', Account_Name: 'Acme' },
+  ];
+  let receivedOptions;
+
+  recordsService.getRecords = async (moduleKey, options) => {
+    receivedOptions = options;
+    return { data: records, info: { count: records.length, more_records: false } };
+  };
+
+  try {
+    const response = await assistantEngine.handleAssistantRequest({ question: 'Show Closed Won Deals in June 2026' });
+    assert.equal(response.success, true);
+    assert.equal(receivedOptions.criteria, '(Stage:equals:Closed Won)and(Closing_Date:greater_equal:2026-06-01T00:00:00Z)and(Closing_Date:less_than:2026-07-01T00:00:00Z)');
+    assert.deepEqual(response.data.map((item) => item.id), ['d1']);
+    assert.equal(response.data.every((item) => item.Closing_Date.startsWith('2026-06')), true);
+  } finally {
+    recordsService.getRecords = originalGetRecords;
+  }
+});
+
 test('query optimization selects only fields needed by the requested calculation', () => {
   const optimized = optimizeExecutionPlan(buildExecutionPlan('Total Closed Won deal revenue this month'));
   const fields = optimized.steps.find((step) => step.type === 'aggregate').requiredFieldsByModule.deals;

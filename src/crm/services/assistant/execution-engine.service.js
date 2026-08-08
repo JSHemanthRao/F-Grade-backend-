@@ -27,6 +27,11 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
         const stepQuestion = period
           ? ` ${question.replace(/\b(this month|last month)\b/gi, '')} ${period}`
           : question;
+        const filterPlan = filterPlans[moduleKey];
+        if (!filterPlan || !filterPlan.valid) {
+          throw new Error('FILTER_VALIDATION_ERROR');
+        }
+
         const requestOptions = {
           question,
           ...(period ? { request_text: stepQuestion } : {}),
@@ -36,9 +41,9 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
             offset: step.offset,
           } : {}),
           ...(conversionDiscovery ? { conversion_fields: conversionDiscovery.fields, conversion_metric: step.metric } : {}),
-          ...(filterPlans[moduleKey] && (period ? filterPlans[moduleKey].serverCriteriaWithoutDate : filterPlans[moduleKey].serverCriteria)
-            ? { criteria: period ? filterPlans[moduleKey].serverCriteriaWithoutDate : filterPlans[moduleKey].serverCriteria }
-            : {}),
+          criteria: period ? filterPlan.serverCriteriaWithoutDate : filterPlan.serverCriteria,
+          canonicalFilters: filterPlan.canonicalFilters,
+          requestedFilters: filterPlan.requestedFilters,
           ...(step.requiredFieldsByModule?.[moduleKey]?.length ? { fields: step.requiredFieldsByModule[moduleKey] } : {}),
           retrievalCache: requestCache,
           retrieval_mode: ['count', 'aggregate', 'analytics', 'compare', 'conversion_count'].includes(step.type) ? 'all' : (step.type === 'query' && step.explicit ? 'page' : 'auto'),
@@ -46,8 +51,8 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
         const cacheKey = JSON.stringify({ moduleKey, period, type: step.type, options: requestOptions });
         const contextual = contextDatasets.find((dataset) => dataset.cacheKey === cacheKey
           || (dataset.module === moduleKey
-            && (dataset.period === period || (period === 'this month' && dataset.period == null))
-            && dataset.requestFingerprint === context.lastQuestion));
+            && dataset.requestFingerprint === context.lastQuestion
+            && (dataset.period === period || (step.type === 'compare' && dataset.period == null))));
         const cached = requestCache.get(cacheKey) || contextual?.result;
         if (cached) {
           datasets.push({ step, period, module: moduleKey, result: cached, reused: true });
@@ -56,6 +61,15 @@ async function executePlan({ plan, question, moduleCandidates, context = {}, con
 
         if (DEBUG_ASSISTANT) logger.info('Execution Engine', { module: moduleKey, period, type: step.type });
         const execute = (options) => recordsService.getRecords(moduleKey, options);
+        if (DEBUG_ASSISTANT) logger.info('Execution Engine', {
+          module: moduleKey,
+          period,
+          type: step.type,
+          criteria: requestOptions.criteria,
+          canonicalFilters: requestOptions.canonicalFilters,
+          requestedFilters: requestOptions.requestedFilters,
+        });
+
         let result;
         try {
           result = await execute(requestOptions);

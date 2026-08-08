@@ -11,13 +11,59 @@ const { formatResponse } = require('./assistant/formatter.service');
 const { discoverLeadConversionFields } = require('../services/conversion-discovery.service');
 const { FALLBACK_REASONS, logFallbackReason } = require('./assistant/fallback-engine.service');
 const { applyFilterToDataset, buildFilterPlans } = require('./filtering-engine.service');
+const {
+  DISPLAY_LIMIT,
+  createDisplayState,
+  getDisplayBatch,
+  isDisplayContinuation,
+} = require('./assistant/display-batching.service');
 const logger = require('../../common/logging/logger');
+
+let lastDisplayContext = null;
+
+function completeRecordsFrom(datasets) {
+  const seen = new Set();
+  return datasets.flatMap((dataset) => dataset?.result?.data || dataset?.data || []).filter((record) => {
+    const id = record?.id ?? record?.ID;
+    if (id === undefined || id === null) return true;
+    const key = String(id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function displayLimitFor(plan) {
+  const requested = Number(plan?.pagination?.per_page);
+  return Number.isInteger(requested) && requested > 0
+    ? Math.min(requested, DISPLAY_LIMIT)
+    : DISPLAY_LIMIT;
+}
 
 async function handleAssistantRequest(payload = {}) {
   const question = String(payload?.question || '').trim();
   if (!question) return { success: false, message: 'A question is required.' };
 
-  const context = payload?.context || payload?.conversationContext || {};
+  const suppliedContext = payload?.context || payload?.conversationContext || {};
+  const continuation = isDisplayContinuation(question);
+  if (continuation && !suppliedContext.datasets?.length && !lastDisplayContext) {
+    return { success: false, message: 'Please specify which CRM records you want to continue viewing.' };
+  }
+  if (continuation && lastDisplayContext) {
+    const display = getDisplayBatch(lastDisplayContext.state, lastDisplayContext.limit);
+    if (display.records.length === 0) {
+      return { success: true, summary: 'No more matching records are available.', data: [], tables: [] };
+    }
+    lastDisplayContext = { ...lastDisplayContext, state: display.nextState };
+    return formatResponse(lastDisplayContext.plan, lastDisplayContext.datasets, lastDisplayContext.calculations, {
+      insights: lastDisplayContext.insights,
+      limitations: lastDisplayContext.limitations,
+      displayRecords: display.records,
+      displayStart: display.start,
+      displayTotal: display.total,
+    });
+  }
+  const context = suppliedContext;
   const plan = optimizeExecutionPlan(buildExecutionPlan(question, context));
   const moduleCandidates = plan.modules;
   if (!moduleCandidates.length) return { success: false, message: 'I could not identify the CRM information needed to answer that question.' };
@@ -91,7 +137,25 @@ async function handleAssistantRequest(payload = {}) {
     return formatResponse(plan, merged.datasets, [], { conversionFallback: true });
   }
 
-  const response = formatResponse(plan, merged.datasets, calculations, { insights: generateInsights(plan, merged.datasets, calculations), limitations });
+  const completeRecords = completeRecordsFrom(merged.datasets);
+  const initialDisplay = getDisplayBatch(createDisplayState(completeRecords), displayLimitFor(plan));
+  const insights = generateInsights(plan, merged.datasets, calculations);
+  const response = formatResponse(plan, merged.datasets, calculations, {
+    insights,
+    limitations,
+    displayRecords: initialDisplay.records,
+    displayStart: initialDisplay.start,
+    displayTotal: initialDisplay.total,
+  });
+  lastDisplayContext = {
+    plan,
+    datasets: merged.datasets,
+    calculations,
+    insights,
+    limitations,
+    limit: displayLimitFor(plan),
+    state: initialDisplay.nextState,
+  };
   const validationResult = validateResponse({ response, plan, datasets: merged.datasets, calculations, limitations });
   if (!validationResult.valid) {
     if (DEBUG_ASSISTANT) logger.warn('Response Validation', { issues: validationResult.issues, warnings: validationResult.warnings });

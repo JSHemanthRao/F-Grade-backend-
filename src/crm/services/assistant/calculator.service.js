@@ -224,10 +224,27 @@ function calculateResult(plan, datasets) {
 
   function addComparison() {
     const periodDatasets = datasets.filter((dataset) => dataset.period);
+    const modules = [...new Set(datasets.map((dataset) => dataset.module).filter(Boolean))];
+
+    if (modules.length > 1 && !periodDatasets.length) {
+      const comparison = {};
+      modules.forEach((module) => {
+        const moduleRecords = datasets
+          .filter((dataset) => dataset.module === module)
+          .flatMap((dataset) => dataset.result?.data || dataset.data || []);
+        comparison[module] = {
+          value: moduleRecords.reduce((sum, record) => sum + (getAmount(record) ?? 0), 0),
+        };
+      });
+      calculations.push({ label: 'Multi-module comparison', type: 'multi_module_comparison', value: comparison });
+      return;
+    }
+
     if (!periodDatasets.length) {
       addLimitation('comparison', 'Comparison periods are unavailable.');
       return;
     }
+
     const periods = periodDatasets.reduce((acc, dataset) => {
       const period = dataset.period || 'all time';
       const module = dataset.module || 'crm';
@@ -235,7 +252,6 @@ function calculateResult(plan, datasets) {
       acc[period][module] = dataset.result?.data || dataset.data || [];
       return acc;
     }, {});
-    const modules = [...new Set(periodDatasets.map((dataset) => dataset.module).filter(Boolean))];
     if (modules.length > 1) {
       const comparison = {};
       modules.forEach((module) => {
@@ -349,9 +365,9 @@ function calculateResult(plan, datasets) {
       calculations.push({ label: 'Closed lost count', type: 'closed_lost_count', value: closedLostCount });
       const openPipelineAmounts = records.filter((record) => isOpenStage(getStage(record))).map(getAmount).filter((value) => value !== null);
       if (openPipelineAmounts.length) {
-        calculations.push({ label: 'Pipeline value', type: 'pipeline_value', value: openPipelineAmounts.reduce((total, value) => total + value, 0) });
+        calculations.push({ label: 'Pipeline value', type: 'pipeline', value: openPipelineAmounts.reduce((total, value) => total + value, 0) });
       } else {
-        addLimitation('pipeline_value', 'Open deal amounts are unavailable for pipeline calculation.');
+        addLimitation('pipeline', 'Open deal amounts are unavailable for pipeline calculation.');
       }
       if (closedWonCount > 0 && closedLostCount > 0) {
         calculations.push({ label: 'Win rate', type: 'win_rate', value: closedWonCount / (closedWonCount + closedLostCount) });
